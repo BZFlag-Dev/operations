@@ -1,0 +1,18 @@
+ServerName my.{{ base_hostname }}
+
+DocumentRoot /var/www/central/public
+<Directory /var/www/central/public>
+    Options -Indexes
+    Require all granted
+
+    <IfModule mod_rewrite.c>
+    RewriteEngine on
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^ index.php [QSA,L]
+    </IfModule>
+</Directory>
+
+ErrorLog ${APACHE_LOG_DIR}/central-legacy.log
+LogLevel warn
+CustomLog ${APACHE_LOG_DIR}/central-legacy.log combined

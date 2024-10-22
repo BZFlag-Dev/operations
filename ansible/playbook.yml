@@ -1,0 +1,429 @@
+---
+- name: Set up main server
+  hosts: mainserver
+
+  vars:
+    base_hostname: "{{ lookup('ansible.builtin.env', 'BASE_HOSTNAME') }}"
+    phpbb_version: "{{ lookup('ansible.builtin.env', 'PHPBB_VERSION', default='3.3.13') }}"
+    phpbb_version_parts: "{{ phpbb_version | split('.') }}"
+    enable_tls: "{{ lookup('ansible.builtin.env', 'ENABLE_TLS', default=0) }}"
+
+  tasks:
+    #################
+    # Initial setup #
+    #################
+
+    - name: Check if base hostname not set
+      ansible.builtin.fail:
+        msg: The BASE_HOSTNAME environment variable was not set
+      when: base_hostname == ''
+
+    - name: Set the hostname
+      become: true
+      ansible.builtin.hostname:
+        name: "{{ base_hostname }}"
+        use: systemd
+
+    - name: Upgrade software packages
+      become: true
+      ansible.builtin.apt:
+        update_cache: true
+        upgrade: full
+        autoremove: true
+
+    - name: Install necessary software packages
+      become: true
+      ansible.builtin.apt:
+        name:
+          - git
+          - bzip2
+          - screen
+          - vim
+          - apache2
+          - php-fpm
+          - php-cli
+          - php-mysql
+          - php-redis
+          - php-json
+          - php-mbstring
+          - php-intl
+          - php-curl
+          - php-gd
+          - php-sqlite3
+          - php-xml
+          - mariadb-client
+          - mariadb-server
+          - redis
+          - unzip
+          - python3-certbot-apache
+          - acl # Used by ansible for becoming an unprivileged user (https://github.com/ansible/ansible/issues/74830)
+          - python3-pymysql # Used for the community.mysql tasks below.
+        state: latest
+
+    - name: Enable Proxy FastCGI Apache module
+      become: true
+      ansible.builtin.command: a2enmod proxy_fcgi
+      args:
+        creates: /etc/apache2/mods-enabled/proxy_fcgi.load
+      register: apache_mod_proxy_fcgi
+
+    - name: Enable SetEnvIf Apache module
+      become: true
+      ansible.builtin.command: a2enmod setenvif
+      args:
+        creates: /etc/apache2/mods-enabled/setenvif.load
+      register: apache_mod_setenvif
+
+    - name: Enable rewrite Apache module
+      become: true
+      ansible.builtin.command: a2enmod rewrite
+      args:
+        creates: /etc/apache2/mods-enabled/rewrite.load
+      register: apache_mod_rewrite
+
+    - name: Enable PHP FPM configuration
+      become: true
+      ansible.builtin.command: a2enconf php8.2-fpm
+      args:
+        creates: /etc/apache2/conf-enabled/php8.2-fpm.conf
+      register: apache_conf_php
+
+    - name: Restart apache2
+      become: true
+      ansible.builtin.systemd_service:
+        name: apache2.service
+        state: restarted
+      ignore_errors: true
+      when: apache_mod_proxy_fcgi.changed or apache_mod_setenvif.changed or apache_mod_rewrite.changed or apache_conf_php.changed
+
+    - name: Check if composer is installed
+      ansible.builtin.stat:
+        path: /usr/local/bin/composer
+      register: composer_installed
+
+    - name: Install composer
+      when: not composer_installed.stat.exists
+      block:
+        - name: Download composer
+          ansible.builtin.script: download-composer.sh
+
+        - name: Copy composer to /usr/local/bin
+          become: true
+          ansible.builtin.command: cp composer.phar /usr/local/bin/composer
+          args:
+            creates: /usr/local/bin/composer
+
+    - name: Update composer
+      become: true
+      ansible.builtin.shell: composer self-update
+      register: update_composer
+      changed_when: "'already using the latest' not in update_composer.stderr"
+
+    - name: Create /etc/apache2/site-snippets/
+      become: true
+      ansible.builtin.file:
+        path: /etc/apache2/site-snippets
+        state: directory
+
+    ############
+    #  Forums  #
+    ############
+
+    - name: Create forums directory
+      become: true
+      ansible.builtin.file:
+        path: /var/www/forums/public
+        state: directory
+        owner: www-data
+        group: www-data
+
+    #- name: Create temporary directory
+    #  ansible.builtin.tempfile:
+    #    state: directory
+    #    suffix: unique_suffix
+    #  register: temp_dir
+
+    # TODO: Check the SHA256 hash
+    #- name: Download phpBB
+    #  ansible.builtin.get_url:
+    #    url: https://download.phpbb.com/pub/release/{{ phpbb_version_parts[0] }}.{{ phpbb_version_parts[1] }}/{{ phpbb_version }}/phpBB-{{ phpbb_version }}.tar.bz2
+    #    dest: "{{ temp_dir.path }}/phpBB-{{ phpbb_version }}.tar.bz2"
+
+    - name: Download and extract phpBB
+      become: true
+      ansible.builtin.unarchive:
+        src: "https://download.phpbb.com/pub/release/{{ phpbb_version_parts[0] }}.{{ phpbb_version_parts[1] }}/{{ phpbb_version }}/phpBB-{{ phpbb_version }}.tar.bz2"
+        #src: "{{ temp_dir.path }}/phpBB-{{ phpbb_version }}.tar.bz2"
+        dest: /var/www/forums/public
+        remote_src: true
+        extra_opts: ['--strip-components=1', '--show-stored-names']
+        creates: /var/www/forums/public/index.php
+        owner: www-data
+        group: www-data
+      register: phpbb_unarchive
+
+    - name: Grep contents of phpBB configuration for PHPBB_INSTALLED
+      ansible.builtin.command: grep PHPBB_INSTALLED /var/www/forums/public/config.php
+      register: forums_installed_check
+      # We're just checking the exit code later to see if phpBB is installed, so don't set this as changed nor failed
+      failed_when: false
+      changed_when: false
+
+    - name: Create MariaDB database for forums
+      become: true
+      community.mysql.mysql_db:
+        name: forums
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+
+    - name: Create password for forums admin user
+      ansible.builtin.set_fact:
+        forums_admin_password: "{{ lookup('ansible.builtin.password', 'credentials/forums/admin', length=16) }}"
+
+    - name: Create password for forums MariaDB user
+      ansible.builtin.set_fact:
+        mariadb_forums_password: "{{ lookup('ansible.builtin.password', 'credentials/mariadb/forums', length=32) }}"
+
+    - name: Create MariaDB user for forums and grant all access to the forums database
+      become: true
+      community.mysql.mysql_user:
+        name: forums
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        # Quell warning. This shouldn't matter anyway, since we aren't using column level privileges
+        column_case_sensitive: false
+        password: "{{ mariadb_forums_password }}"
+        priv: "forums.*:ALL"
+
+    - name: Install phpBB
+      when: forums_installed_check.rc != 0
+      block:
+        - name: Create the phpBB install configuration file
+          become: true
+          become_user: www-data
+          ansible.builtin.template:
+            src: phpbb/install-config.yml.j2
+            dest: /var/www/forums/install-config.yml
+
+        - name: Create directory for ansible
+          become: true
+          ansible.builtin.file:
+            path: /var/www/.ansible
+            state: directory
+            owner: www-data
+            group: www-data
+
+        - name: Run phpBB installer
+          become: true
+          become_user: www-data
+          ansible.builtin.command: php /var/www/forums/public/install/phpbbcli.php install /var/www/forums/install-config.yml
+
+        - name: Delete the phpBB installer configuration
+          become: true
+          become_user: www-data
+          ansible.builtin.file:
+            path: /var/www/forums/install-config.yml
+            state: absent
+
+    - name: Configure forums for HTTPS
+      when: enable_tls == 1
+      block:
+        - name: phpBB - Set cookie_secure to 1
+          become: true
+          become_user: www-data
+          ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set cookie_secure 1
+
+        - name: phpBB - Set server_protocol to https://
+          become: true
+          become_user: www-data
+          ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set server_protocol https://
+
+        - name: phpBB - Set server_port to 443
+          become: true
+          become_user: www-data
+          ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set server_port 443
+
+    - name: Configure forums for HTTP
+      when: enable_tls != 1
+      block:
+        - name: phpBB - Set cookie_secure to 0
+          become: true
+          become_user: www-data
+          ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set cookie_secure 0
+
+        - name: phpBB - Set server_protocol to http://
+          become: true
+          become_user: www-data
+          ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set server_protocol http://
+
+        - name: phpBB - Set server_port to 80
+          become: true
+          become_user: www-data
+          ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set server_port 80
+
+    - name: Delete the phpBB install directory
+      become: true
+      become_user: www-data
+      ansible.builtin.file:
+        path: /var/www/forums/public/install/
+        state: absent
+
+    - name: Disable viglink extension
+      become: true
+      become_user: www-data
+      ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php extension:disable phpbb/viglink
+      register: phpbb_disable_viglink
+      failed_when: phpbb_disable_viglink.rc == 1
+      changed_when: phpbb_disable_viglink.rc == 0
+
+    - name: Purge data for viglink extension
+      become: true
+      become_user: www-data
+      ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php extension:purge phpbb/viglink
+      when: phpbb_disable_viglink.changed
+
+    - name: Delete viglink extension extension
+      become: true
+      become_user: www-data
+      ansible.builtin.file:
+        path: /var/www/forums/public/ext/phpbb/viglink/
+        state: absent
+
+    - name: Create the forums apache snippet configuration
+      become: true
+      ansible.builtin.template:
+        src: apache2/site-snippets/forums.conf.j2
+        dest: /etc/apache2/site-snippets/forums.conf
+      register: apache_snippet_forums
+
+    - name: Create the forums virtualhost configuration
+      become: true
+      ansible.builtin.template:
+        src: apache2/sites-available/forums.conf.j2
+        dest: /etc/apache2/sites-available/forums.conf
+      register: apache_vhost_forums
+
+    - name: Enable the forums site
+      become: true
+      ansible.builtin.command: a2ensite forums.conf
+      register: apache_ensite_forums
+      changed_when: "'already enabled' not in apache_ensite_forums.stdout"
+
+    - name: Reload apache2
+      become: true
+      ansible.builtin.systemd_service:
+        name: apache2.service
+        state: reloaded
+      when: apache_snippet_forums.changed or apache_vhost_forums.changed or apache_ensite_forums.changed
+
+    ##############################################
+    #  Central - Server list and authentication  #
+    ##############################################
+
+    - name: Create central directory
+      become: true
+      ansible.builtin.file:
+        path: /var/www/central
+        state: directory
+        owner: www-data
+        group: www-data
+
+    - name: Clone central repository
+      become: true
+      become_user: www-data
+      ansible.builtin.git:
+        repo: 'https://github.com/BZFlag-Dev/bzflag-bzfls3'
+        dest: /var/www/central
+        version: master
+
+    - name: Install main dependencies using composer
+      become: true
+      become_user: www-data
+      ansible.builtin.command: composer install -d /var/www/central --no-dev --optimize-autoloader
+      register: composer_install_central
+      changed_when: "'Nothing to install, update or remove' not in composer_install_central.stdout"
+
+    - name: Install tools dependencies using composer
+      become: true
+      become_user: www-data
+      ansible.builtin.command: composer install -d /var/www/central/tools --no-dev
+      register: composer_install_central_tools
+      changed_when: "'Nothing to install, update or remove' not in composer_install_central_tools.stdout"
+
+    - name: Create MariaDB database for central
+      become: true
+      community.mysql.mysql_db:
+        name: central
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+      register: mariadb_created_central
+
+    - name: Create password for central MariaDB user
+      ansible.builtin.set_fact:
+        mariadb_central_password: "{{ lookup('ansible.builtin.password', 'credentials/mariadb/central', length=32) }}"
+
+    - name: Create MariaDB user for central and grant necessary access to the central and forums databases
+      become: true
+      community.mysql.mysql_user:
+        name: central
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        # Quell warning. This shouldn't matter anyway, since we aren't using column level privileges
+        column_case_sensitive: false
+        password: "{{ mariadb_central_password }}"
+        priv: "central.*:SELECT,INSERT,UPDATE,DELETE/forums.phpbb_groups:SELECT/forums.phpbb_user_group:SELECT/forums.phpbb_users:SELECT,UPDATE"
+
+    # TODO: Implement database migration into central. This will only import the first time we create the database.
+    - name: Create central database structure
+      become: true
+      ansible.builtin.shell: mariadb central < /var/www/central/structure.sql
+      when: mariadb_created_central.changed
+
+    - name: Create the central configuration
+      become: true
+      ansible.builtin.template:
+        src: central/config.php.j2
+        dest: /var/www/central/config.php
+
+    - name: Create the central apache snippet configuration
+      become: true
+      ansible.builtin.template:
+        src: apache2/site-snippets/central.conf.j2
+        dest: /etc/apache2/site-snippets/central.conf
+      register: apache_snippet_central
+
+    - name: Create the central legacy apache snippet configuration
+      become: true
+      ansible.builtin.template:
+        src: apache2/site-snippets/central-legacy.conf.j2
+        dest: /etc/apache2/site-snippets/central-legacy.conf
+      register: apache_snippet_central_legacy
+
+    - name: Create the central virtualhost configuration
+      become: true
+      ansible.builtin.template:
+        src: apache2/sites-available/central.conf.j2
+        dest: /etc/apache2/sites-available/central.conf
+      register: apache_vhost_central
+
+    - name: Enable the central site
+      become: true
+      ansible.builtin.command: a2ensite central.conf
+      register: apache_ensite_central
+      changed_when: "'already enabled' not in apache_ensite_central.stdout"
+
+    - name: Reload apache2
+      become: true
+      ansible.builtin.systemd_service:
+        name: apache2.service
+        state: reloaded
+      when: apache_snippet_central.changed or apache_snippet_central_legacy or apache_vhost_central.changed or apache_ensite_central.changed
+
+    ###############
+    # Final steps #
+    ###############
+
+    # NOTE: This should also enable mod_ssl and restart/reload apache2
+    - name: Create certificates
+      when: enable_tls == 1
+      become: true
+      # TODO: Allow passing in an email for renewal issue alerts
+      # TODO: Support passing --test-cert for non-production systems?
+      ansible.builtin.command: "certbot --apache --register-unsafely-without-email --agree-tos  --cert-name {{ base_hostname }} certonly"
+      register: certbot_certonly

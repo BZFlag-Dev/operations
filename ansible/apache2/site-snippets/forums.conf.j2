@@ -1,0 +1,32 @@
+ServerName forums.{{ base_hostname }}
+
+DocumentRoot /var/www/forums/public
+<Directory /var/www/forums/public>
+    DirectoryIndex /index.php
+    Options -Indexes
+    Require all granted
+    AllowOverride all
+</Directory>
+
+<Directory /var/www/forums/public/cache>
+    Require all denied
+</Directory>
+<Directory /var/www/forums/public/files>
+    Require all denied
+</Directory>
+<Directory /var/www/forums/public/includes>
+    Require all denied
+</Directory>
+<Directory /var/www/forums/public/phpbb>
+    Require all denied
+</Directory>
+<Directory /var/www/forums/public/store>
+    Require all denied
+</Directory>
+<Directory /var/www/forums/public/vendor>
+    Require all denied
+</Directory>
+
+ErrorLog ${APACHE_LOG_DIR}/forums-error.log
+LogLevel warn
+CustomLog ${APACHE_LOG_DIR}/forums-access.log combined

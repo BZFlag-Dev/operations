@@ -1,0 +1,13 @@
+<?php
+  return [
+    'legacy_host' => 'my.{{ base_hostname }}',
+    'phpbb' => [
+      'root_path' => '/var/www/forums/',
+      'database' => 'forums',
+    ],
+    'database' => [
+      'database' => 'central',
+      'username' => 'central',
+      'password' => '{{ mariadb_central_password }}'
+    ]
+  ];

@@ -1,0 +1,38 @@
+installer:
+  admin:
+    name: admin
+    password: {{ forums_admin_password }}
+    email: admin@{{ base_hostname }}
+
+  board:
+    lang: en
+    name: Forums
+    description: Insert description here
+
+  database:
+    dbms: mysqli
+    dbhost: ~
+    dbport: ~
+    dbuser: forums
+    dbpasswd: {{ mariadb_forums_password }}
+    dbname: forums
+    table_prefix: phpbb_
+
+  email:
+    enabled: true
+    smtp_delivery: ~
+    smtp_host: ~
+    smtp_port: ~
+    smtp_auth: ~
+    smtp_user: ~
+    smtp_pass: ~
+
+  server:
+    cookie_secure: false
+    server_protocol: http://
+    force_server_vars: true
+    server_name: forums.{{ base_hostname }}
+    server_port: 80
+    script_path: /
+
+  extensions: []
