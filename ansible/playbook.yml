@@ -125,6 +125,22 @@
         path: /etc/apache2/site-snippets
         state: directory
 
+    - name: Create directory for ansible
+      become: true
+      ansible.builtin.file:
+        path: /var/www/.ansible
+        state: directory
+        owner: www-data
+        group: www-data
+
+    - name: Create cache directory that composer can use
+      become: true
+      ansible.builtin.file:
+        path: /var/www/.cache
+        state: directory
+        owner: www-data
+        group: www-data
+
     ############
     #  Forums  #
     ############
@@ -202,14 +218,6 @@
           ansible.builtin.template:
             src: phpbb/install-config.yml.j2
             dest: /var/www/forums/install-config.yml
-
-        - name: Create directory for ansible
-          become: true
-          ansible.builtin.file:
-            path: /var/www/.ansible
-            state: directory
-            owner: www-data
-            group: www-data
 
         - name: Run phpBB installer
           become: true
@@ -339,14 +347,14 @@
       become_user: www-data
       ansible.builtin.command: composer install -d /var/www/central --no-dev --optimize-autoloader
       register: composer_install_central
-      changed_when: "'Nothing to install, update or remove' not in composer_install_central.stdout"
+      changed_when: "'Nothing to install, update or remove' not in composer_install_central.stderr"
 
     - name: Install tools dependencies using composer
       become: true
       become_user: www-data
       ansible.builtin.command: composer install -d /var/www/central/tools --no-dev
       register: composer_install_central_tools
-      changed_when: "'Nothing to install, update or remove' not in composer_install_central_tools.stdout"
+      changed_when: "'Nothing to install, update or remove' not in composer_install_central_tools.stderr"
 
     - name: Create MariaDB database for central
       become: true
@@ -369,14 +377,51 @@
         password: "{{ mariadb_central_password }}"
         priv: "central.*:SELECT,INSERT,UPDATE,DELETE/forums.phpbb_groups:SELECT/forums.phpbb_user_group:SELECT/forums.phpbb_users:SELECT,UPDATE"
 
-    # TODO: Implement database migration into central. This will only import the first time we create the database.
-    - name: Create central database structure
+    - name: Create password for central_migration MariaDB user
+      ansible.builtin.set_fact:
+        mariadb_central_migration_password: "{{ lookup('ansible.builtin.password', 'credentials/mariadb/central_migration', length=32) }}"
+
+    - name: Create MariaDB user for central_migration and grant necessary access to the central
       become: true
-      ansible.builtin.shell: mariadb central < /var/www/central/structure.sql
-      when: mariadb_created_central.changed
+      community.mysql.mysql_user:
+        name: central_migration
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        # Quell warning. This shouldn't matter anyway, since we aren't using column level privileges
+        column_case_sensitive: false
+        password: "{{ mariadb_central_migration_password }}"
+        priv: "central.*:SELECT,INSERT,UPDATE,DELETE,ALTER,CREATE,DROP"
+
+    - name: Create the central Phinx configuration
+      become: true
+      become_user: www-data
+      ansible.builtin.template:
+        src: central/phinx-config.php.j2
+        dest: /var/www/central/phinx-config.php
+
+    - name: Check if central database requires migration
+      become: true
+      become_user: www-data
+      ansible.builtin.command: php tools/vendor/bin/phinx status -q
+      args:
+        chdir: /var/www/central
+      register: central_migration_status
+      failed_when:
+        - central_migration_status.rc != 0
+        - central_migration_status.rc != 2
+        - central_migration_status.rc != 3
+      changed_when: false
+
+    - name: Migrate central database
+      when: central_migration_status.rc == 2 or central_migration_status.rc == 3
+      become: true
+      become_user: www-data
+      ansible.builtin.command: php tools/vendor/bin/phinx migrate
+      args:
+        chdir: /var/www/central
 
     - name: Create the central configuration
       become: true
+      become_user: www-data
       ansible.builtin.template:
         src: central/config.php.j2
         dest: /var/www/central/config.php
@@ -413,7 +458,7 @@
       ansible.builtin.systemd_service:
         name: apache2.service
         state: reloaded
-      when: apache_snippet_central.changed or apache_snippet_central_legacy or apache_vhost_central.changed or apache_ensite_central.changed
+      when: apache_snippet_central.changed or apache_snippet_central_legacy.changed or apache_vhost_central.changed or apache_ensite_central.changed
 
     ###############
     # Final steps #
