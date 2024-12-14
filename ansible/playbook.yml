@@ -123,7 +123,7 @@
       when: not composer_installed.stat.exists or not composer_installed.stat.executable
       block:
         - name: Download composer
-          ansible.builtin.script: download-composer.sh
+          ansible.builtin.script: scripts/download-composer.sh
 
         - name: Copy composer to /usr/local/bin
           become: true
