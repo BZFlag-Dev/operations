@@ -1,0 +1,60 @@
+#!/bin/bash
+
+BASE_DIR=/opt/homepage
+REPO_DIR=$BASE_DIR/bzflag.org
+BRANCH=master
+LOG_DIR=$BASE_DIR/logs
+STAKX_DIR=$BASE_DIR/stakx
+TARGET_DIR=/var/www/homepage/
+LOCK_FILE=$BASE_DIR/.update.lock
+
+pushd $REPO_DIR 1> /dev/null
+
+git fetch --all 1> /dev/null
+
+LOCAL_REV=$(git rev-parse $BRANCH)
+REMOTE_REV=$(git rev-parse origin/$BRANCH)
+
+if  [[ "$LOCAL_REV" != "$REMOTE_REV" || "x$1" == "xforce" ]] ; then
+        if [ -f $LOCK_FILE ] ; then
+                echo Rebuild lockfile found. Canceling this build attempt.
+                exit 1
+        fi
+
+        LOG_FILE=$LOG_DIR/$(date +%Y-%m-%d-%H%M%S).log
+        SUBJECT_FILE=$LOG_FILE.subject
+
+        (
+                echo "💩 BZFlag Site Build - Fail" > $SUBJECT_FILE
+
+                # Prevent the script from running multiple times
+                touch $LOCK_FILE && \
+
+                # Change to the stakx directory
+                pushd $STAKX_DIR 1> /dev/null && \
+
+                # Attempt to update stakx
+                echo "** Updating stakx **" && \
+                git pull --ff-only && \
+                composer install --no-dev --optimize-autoloader --no-ansi && \
+
+                # Change back to the previous directory
+                popd 1> /dev/null && \
+
+                # Update and rebuild the site
+                echo "** Updating and rebuilding site **" && \
+                git pull --ff-only && \
+                $STAKX_DIR/bin/stakx build --use-cache && \
+                cp -Rp _site/* $TARGET_DIR && \
+                echo "Success!" && echo "🌮️ BZFlag Site Build - Success" > $SUBJECT_FILE
+        ) 2>&1 | tee $LOGFILE
+
+        rm $LOCK_FILE
+
+{% for notify_address in homepage.build_cron.notify_addresses %}
+        cat $LOG_FILE | mail -s "`cat $SUBJEFT_FILE`" -r "{{ homepage.build_cron.from_address }}" "{{ notify_address }}"
+{% endfor %}
+fi
+
+popd 1> /dev/null
+

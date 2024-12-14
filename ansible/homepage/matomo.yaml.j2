@@ -1,0 +1,8 @@
+cookieDomain: "{{ homepage.matomo.cookie_domain }}"
+domains:
+{% for domain in homepage.matomo.domains %}
+    - "{{ domain }}"
+{% endfor %}
+baseURL: {{ homepage.matomo.base_url }}
+siteID: {{ homepage.matomo.site_id }}
+

@@ -2,11 +2,11 @@
 - name: Set up main server
   hosts: mainserver
 
+  vars_files:
+    - settings.yml
+
   vars:
-    base_hostname: "{{ lookup('ansible.builtin.env', 'BASE_HOSTNAME') }}"
-    phpbb_version: "{{ lookup('ansible.builtin.env', 'PHPBB_VERSION', default='3.3.13') }}"
     phpbb_version_parts: "{{ phpbb_version | split('.') }}"
-    enable_tls: "{{ lookup('ansible.builtin.env', 'ENABLE_TLS', default=0) }}"
 
   tasks:
     #################
@@ -18,6 +18,7 @@
         msg: The BASE_HOSTNAME environment variable was not set
       when: base_hostname == ''
 
+    # TODO: Also update /etc/hosts with the new hostname?
     - name: Set the hostname
       become: true
       ansible.builtin.hostname:
@@ -81,6 +82,13 @@
         creates: /etc/apache2/mods-enabled/rewrite.load
       register: apache_mod_rewrite
 
+    - name: Enable headers Apache module
+      become: true
+      ansible.builtin.command: a2enmod headers
+      args:
+        creates: /etc/apache2/mods-enabled/headers.load
+      register: apache_mod_headers
+
     - name: Enable PHP FPM configuration
       become: true
       ansible.builtin.command: a2enconf php8.2-fpm
@@ -88,13 +96,23 @@
         creates: /etc/apache2/conf-enabled/php8.2-fpm.conf
       register: apache_conf_php
 
+    # This prevents the default virtualhost from overriding a virtualhost that uses the base hostname
+    - name: Add ServerName to default apache virtualhost
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/apache2/sites-available/000-default.conf
+        regexp: '^\tServerName '
+        insertafter: '^\t#ServerName '
+        line: "\tServerName 127.0.0.1"
+      register: apache_conf_default_servername
+
     - name: Restart apache2
       become: true
       ansible.builtin.systemd_service:
         name: apache2.service
         state: restarted
       ignore_errors: true
-      when: apache_mod_proxy_fcgi.changed or apache_mod_setenvif.changed or apache_mod_rewrite.changed or apache_conf_php.changed
+      when: apache_mod_proxy_fcgi.changed or apache_mod_setenvif.changed or apache_mod_rewrite.changed or apache_mod_headers.changed or apache_conf_php.changed or apache_conf_default_servername.changed
 
     - name: Check if composer is installed
       ansible.builtin.stat:
@@ -102,16 +120,18 @@
       register: composer_installed
 
     - name: Install composer
-      when: not composer_installed.stat.exists
+      when: not composer_installed.stat.exists or not composer_installed.stat.executable
       block:
         - name: Download composer
           ansible.builtin.script: download-composer.sh
 
         - name: Copy composer to /usr/local/bin
           become: true
-          ansible.builtin.command: cp composer.phar /usr/local/bin/composer
-          args:
-            creates: /usr/local/bin/composer
+          ansible.builtin.copy:
+            src: composer.phar
+            dest: /usr/local/bin/composer
+            remote_src: true
+            mode: u+rwx,g+rx,o+rx
 
     - name: Update composer
       become: true
@@ -140,6 +160,20 @@
         state: directory
         owner: www-data
         group: www-data
+
+    - name: Create the SSL apache snippet configuration
+      become: true
+      ansible.builtin.template:
+        src: apache2/site-snippets/ssl.conf.j2
+        dest: /etc/apache2/site-snippets/ssl.conf
+      register: apache_snippet_ssl
+
+    - name: Create the HSTS apache snippet configuration
+      become: true
+      ansible.builtin.template:
+        src: apache2/site-snippets/hsts.conf.j2
+        dest: /etc/apache2/site-snippets/hsts.conf
+      register: apache_snippet_hsts
 
     ############
     #  Forums  #
@@ -342,17 +376,17 @@
         dest: /var/www/central
         version: master
 
-    - name: Install main dependencies using composer
+    - name: Install dependencies for central using composer
       become: true
       become_user: www-data
-      ansible.builtin.command: composer install -d /var/www/central --no-dev --optimize-autoloader
+      ansible.builtin.command: composer install -d /var/www/central --no-dev --optimize-autoloader --no-ansi
       register: composer_install_central
       changed_when: "'Nothing to install, update or remove' not in composer_install_central.stderr"
 
-    - name: Install tools dependencies using composer
+    - name: Install tools dependencies for central using composer
       become: true
       become_user: www-data
-      ansible.builtin.command: composer install -d /var/www/central/tools --no-dev
+      ansible.builtin.command: composer install -d /var/www/central/tools --no-dev --no-ansi
       register: composer_install_central_tools
       changed_when: "'Nothing to install, update or remove' not in composer_install_central_tools.stderr"
 
@@ -453,12 +487,180 @@
       register: apache_ensite_central
       changed_when: "'already enabled' not in apache_ensite_central.stdout"
 
-    - name: Reload apache2
+    - name: Reload apache2 after changes for central site
       become: true
       ansible.builtin.systemd_service:
         name: apache2.service
         state: reloaded
       when: apache_snippet_central.changed or apache_snippet_central_legacy.changed or apache_vhost_central.changed or apache_ensite_central.changed
+
+    ##############################
+    # Homepage - Static homepage #
+    ##############################
+
+    - name: Create homepage directory where the built site is copied
+      become: true
+      ansible.builtin.file:
+        path: /var/www/homepage
+        state: directory
+        owner: www-data
+        group: www-data
+
+    - name: Create bzflag-bans directory where the master-bans.txt file lives
+      become: true
+      ansible.builtin.file:
+        path: /var/www/homepage-bans
+        state: directory
+        owner: www-data
+        group: www-data
+
+    - name: Create directory in /opt to store repositories and scripts for building the homepage
+      become: true
+      ansible.builtin.file:
+        path: /opt/homepage
+        state: directory
+        owner: www-data
+        group: www-data
+
+    - name: Create directory in /opt for the logs
+      become: true
+      ansible.builtin.file:
+        path: /opt/homepage/logs
+        state: directory
+        owner: www-data
+        group: www-data
+
+    - name: Clone bzflag.org repository
+      become: true
+      become_user: www-data
+      ansible.builtin.git:
+        repo: 'https://github.com/BZFlag-Dev/bzflag.org'
+        dest: /opt/homepage/bzflag.org
+        version: master
+      register: git_clone_homepage_bzflag_org
+
+    - name: Clone stakx repository
+      become: true
+      become_user: www-data
+      ansible.builtin.git:
+        repo: 'https://github.com/stakx-io/stakx'
+        dest: /opt/homepage/stakx
+        version: 0.2
+      register: git_clone_homepage_stakx
+
+    - name: Install stakx dependencies using composer
+      become: true
+      become_user: www-data
+      ansible.builtin.command: composer install -d /opt/homepage/stakx --no-dev --optimize-autoloader --no-ansi
+      register: composer_install_homepage_stakx
+      changed_when: "'Nothing to install, update or remove' not in composer_install_homepage_stakx.stderr"
+
+    - name: Fetch website assets
+      become: true
+      become_user: www-data
+      ansible.builtin.command: php /opt/homepage/bzflag.org/fetch-assets.php
+      register: php_fetch_assets_homepage
+      changed_when: "'Downloading' in php_fetch_assets_homepage.stdout"
+
+    - name: Create matomo.yaml
+      become: true
+      become_user: www-data
+      ansible.builtin.template:
+        src: homepage/matomo.yaml.j2
+        dest: /opt/homepage/bzflag.org/_data/matomo.yaml
+
+    - name: Create privacy.yaml
+      become: true
+      become_user: www-data
+      ansible.builtin.template:
+        src: homepage/privacy.yaml.j2
+        dest: /opt/homepage/bzflag.org/_data/privacy.yaml
+
+    - name: Build the site
+      become: true
+      become_user: www-data
+      ansible.builtin.command: /opt/homepage/stakx/bin/stakx build --use-cache
+      args:
+        chdir: /opt/homepage/bzflag.org
+      register: stakx_build_homepage
+      when: git_clone_homepage_bzflag_org.changed or git_clone_homepage_stakx.changed or composer_install_homepage_stakx.changed or php_fetch_assets_homepage.changed
+
+    - name: Copy the site to the final destination
+      become: true
+      become_user: www-data
+      ansible.builtin.copy:
+        src: /opt/homepage/bzflag.org/_site/
+        dest: /var/www/homepage
+        remote_src: true
+        mode: preserve
+      when: stakx_build_homepage.changed
+
+    # TODO: Replace this with something else, as this is archived
+    - name: Clone bzflag-web repository
+      become: true
+      become_user: www-data
+      ansible.builtin.git:
+        repo: 'https://github.com/BZFlag-Dev/bzflag-web'
+        dest: /var/www/homepage-bans
+        version: masterban
+
+    - name: Create flathub directory which will contain the org.flathub.VerifiedApps.txt file
+      become: true
+      ansible.builtin.file:
+        path: /var/www/homepage-flathub
+        state: directory
+        owner: www-data
+        group: www-data
+
+    - name: Create the org.flathub.VerifiedApps.txt file
+      become: true
+      become_user: www-data
+      ansible.builtin.copy:
+        content: 'f06adc6d-2675-4f19-a21e-137c12b98408'
+        dest: /var/www/homepage-flathub/org.flathub.VerifiedApps.txt
+
+    - name: Create the homepage apache snippet configuration
+      become: true
+      ansible.builtin.template:
+        src: apache2/site-snippets/homepage.conf.j2
+        dest: /etc/apache2/site-snippets/homepage.conf
+      register: apache_snippet_homepage
+
+    - name: Create the homepage virtualhost configuration
+      become: true
+      ansible.builtin.template:
+        src: apache2/sites-available/homepage.conf.j2
+        dest: /etc/apache2/sites-available/homepage.conf
+      register: apache_vhost_homepage
+
+    - name: Enable the homepage site
+      become: true
+      ansible.builtin.command: a2ensite homepage.conf
+      register: apache_ensite_homepage
+      changed_when: "'already enabled' not in apache_ensite_homepage.stdout"
+
+    - name: Reload apache2
+      become: true
+      ansible.builtin.systemd_service:
+        name: apache2.service
+        state: reloaded
+      when: apache_snippet_homepage.changed or apache_vhost_homepage.changed or apache_ensite_homepage.changed
+
+    - name: Create homepage update.sh
+      become: true
+      become_user: www-data
+      ansible.builtin.template:
+        src: homepage/update.sh.j2
+        dest: /opt/homepage/update.sh
+        mode: u+rx
+
+    - name: Create cron job to run homepage update.sh
+      become: true
+      become_user: www-data
+      ansible.builtin.cron:
+        name: 'Automatically build homepage when updated'
+        minute: '*/5'
+        job: '/opt/homepage/update.sh'
 
     ###############
     # Final steps #
@@ -472,3 +674,4 @@
       # TODO: Support passing --test-cert for non-production systems?
       ansible.builtin.command: "certbot --apache --register-unsafely-without-email --agree-tos  --cert-name {{ base_hostname }} certonly"
       register: certbot_certonly
+

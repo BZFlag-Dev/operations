@@ -1,0 +1,40 @@
+ServerName www.{{ base_hostname }}
+ServerAlias {{ base_hostname }}
+
+<IfModule mod_ssl.c>
+Redirect permanent /documentation/getting_started/ https://www.bzflag.org/getting-started/
+<If "%{HTTP_HOST} != 'www.{{ base_hostname }}'">
+    Redirect permanent "/" "https://www.{{ base_hostname }}/"
+</If>
+<If "%{SERVER_PROTOCOL} != 'HTTPS'">
+    Redirect permanent "/" "https://www.{{ base_hostname }}/"
+</If>
+</IfModule>
+<IfModule !mod_ssl.c>
+Redirect permanent /documentation/getting_started/ http://www.bzflag.org/getting-started/
+<If "%{HTTP_HOST} != 'www.{{ base_hostname }}'">
+    Redirect permanent "/" "http://www.{{ base_hostname }}/"
+</If>
+</IfModule>
+
+DocumentRoot /var/www/homepage
+
+Alias /motd.php /var/www/homepage/motd.txt
+Alias /master-bans.txt /var/www/homepage-bans/master-bans.txt
+Alias /.well-known/org.flathub.VerifiedApps.txt /var/www/homepage-flathub/org.flathub.VerifiedApps.txt
+
+<Directory /var/www/homepage>
+    AllowOverride None
+    Options -Indexes
+    Require all granted
+
+    <IfModule mod_rewrite.c>
+        RewriteEngine on
+        RewriteRule \/index\.html - [R=404,L]
+    </IfModule>
+</Directory>
+
+ErrorLog ${APACHE_LOG_DIR}/homepage.log
+LogLevel warn
+CustomLog ${APACHE_LOG_DIR}/homepage.log combined
+

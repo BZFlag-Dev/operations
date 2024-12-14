@@ -9,17 +9,12 @@
 <IfModule mod_ssl.c>
 <VirtualHost *:443>
     Include /etc/apache2/site-snippets/central-legacy.conf
-
-    SSLCertificateFile /etc/letsencrypt/live/{{ base_hostname }}/fullchain.pem
-    SSLCertificateKeyFile /etc/letsencrypt/live/{{ base_hostname }}/privkey.pem
-    Include /etc/letsencrypt/options-ssl-apache.conf
+    Include /etc/apache2/site-snippets/ssl.conf
 </VirtualHost>
 
 <VirtualHost *:443>
     Include /etc/apache2/site-snippets/central.conf
-
-    SSLCertificateFile /etc/letsencrypt/live/{{ base_hostname }}/fullchain.pem
-    SSLCertificateKeyFile /etc/letsencrypt/live/{{ base_hostname }}/privkey.pem
-    Include /etc/letsencrypt/options-ssl-apache.conf
+    Include /etc/apache2/site-snippets/ssl.conf
 </VirtualHost>
 </IfModule>
+

@@ -1,0 +1,36 @@
+base_hostname: domain.test
+phpbb_version: 3.3.13
+enable_tls: 0
+homepage:
+  build_cron:
+    # Email address that stakx build notifications should be sent from
+    from_address: noreply@domain.test
+    # Email addresses that stakx build notifications should be sent to
+    notify_addresses:
+      - admin1@domain.test
+      - admin2@domain.test
+  privacy:
+    operator:
+      name: Joe Somebody
+      email: joe@domain.test
+  matomo:
+    cookie_domain: '*.domain.test'
+    domains:
+      - '*.domain.test'
+    base_url: 'https://apps.domain.test/matomo/'
+    site_id: 1006
+asset_manager:
+  site:
+    # Published address for DMCA takedown notices
+    takedown_address: dmca@domain.test
+  auth:
+    # The forum group whose members are granted moderator rights on the asset manager
+    admin_group: SOME.GROUP
+  email:
+    # Email address that emails to users and moderators should be sent from
+    from_address: noreply@domain.test
+    # Email address that should be notified about uploaded assets
+    notify_addresses:
+      - admin1@domain.test
+      - admin2@domain.test
+
