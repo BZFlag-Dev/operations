@@ -34,7 +34,7 @@ Alias /.well-known/org.flathub.VerifiedApps.txt /var/www/homepage-flathub/org.fl
     </IfModule>
 </Directory>
 
-ErrorLog ${APACHE_LOG_DIR}/homepage.log
+ErrorLog ${APACHE_LOG_DIR}/homepage-error.log
 LogLevel warn
-CustomLog ${APACHE_LOG_DIR}/homepage.log combined
+CustomLog ${APACHE_LOG_DIR}/homepage-access.log combined
 
