@@ -680,6 +680,85 @@
             job: '/opt/homepage/update.sh'
 
     ###############
+    # Assets Site #
+    ###############
+    - name: Install and set up assets
+      when: asset_manager.enabled
+      block:
+        - name: Create assets directory
+          become: true
+          ansible.builtin.file:
+            path: /var/www/assets/public
+            state: directory
+            owner: www-data
+            group: www-data
+
+        - name: Create asset-manager directory
+          become: true
+          ansible.builtin.file:
+            path: /var/www/asset-manager
+            state: directory
+            owner: www-data
+            group: www-data
+
+        - name: Clone asset-manager repository
+          become: true
+          become_user: www-data
+          ansible.builtin.git:
+            repo: 'https://github.com/BZFlag-Dev/asset-manager'
+            dest: /var/www/asset-manager
+            version: master
+
+        - name: Create symbolic link for the directory index
+          become: true
+          become_user: www-data
+          ansible.builtin.file:
+            path: /var/www/assets/public/index.php
+            src: /var/www/asset-manager/directory_index.php
+            state: link
+
+        - name: Install dependencies for asset-manager using composer
+          become: true
+          become_user: www-data
+          ansible.builtin.command: composer install -d /var/www/asset-manager --no-dev --optimize-autoloader --no-ansi
+          register: composer_install_asset_manager
+          changed_when: "'Nothing to install, update or remove' not in composer_install_asset_manager.stderr"
+
+        - name: Create the asset-manager configuration
+          become: true
+          become_user: www-data
+          ansible.builtin.template:
+            src: asset-manager/config.php.j2
+            dest: /var/www/asset-manager/config.php
+
+        - name: Create the assets apache snippet configuration
+          become: true
+          ansible.builtin.template:
+            src: apache2/site-snippets/assets.conf.j2
+            dest: /etc/apache2/site-snippets/assets.conf
+          register: apache_snippet_assets
+
+        - name: Create the assets virtualhost configuration
+          become: true
+          ansible.builtin.template:
+            src: apache2/sites-available/assets.conf.j2
+            dest: /etc/apache2/sites-available/assets.conf
+          register: apache_vhost_assets
+
+        - name: Enable the assets site
+          become: true
+          ansible.builtin.command: a2ensite assets.conf
+          register: apache_ensite_assets
+          changed_when: "'already enabled' not in apache_ensite_assets.stdout"
+
+        - name: Reload apache2 after changes for assets site
+          become: true
+          ansible.builtin.systemd_service:
+            name: apache2.service
+            state: reloaded
+          when: apache_snippet_assets.changed or apache_vhost_assets.changed or apache_ensite_assets.changed
+
+    ###############
     # Final steps #
     ###############
 

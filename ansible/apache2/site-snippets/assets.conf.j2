@@ -1,0 +1,23 @@
+ServerName images.{{ base_hostname }}
+
+DocumentRoot /var/www/assets/public
+<Directory /var/www/assets/public>
+    Require all granted
+    DirectoryIndex /index.php
+</Directory>
+
+Alias /manage /var/www/asset-manager/public
+<Directory /var/www/asset-manager/public>
+    Require all granted
+
+    RewriteEngine On
+    RewriteBase /manage
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteRule ^ index.php [QSA,L]
+</Directory>
+
+ErrorLog ${APACHE_LOG_DIR}/assets-errors.log
+LogLevel warn
+CustomLog ${APACHE_LOG_DIR}/assets-access.log combined
+
