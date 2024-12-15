@@ -6,7 +6,7 @@
     - settings.yml
 
   vars:
-    phpbb_version_parts: "{{ phpbb_version | split('.') }}"
+    phpbb_version_parts: "{{ forums.phpbb_version | split('.') }}"
 
   tasks:
     #################
@@ -179,488 +179,505 @@
     #  Forums  #
     ############
 
-    - name: Create forums directory
-      become: true
-      ansible.builtin.file:
-        path: /var/www/forums/public
-        state: directory
-        owner: www-data
-        group: www-data
-
-    #- name: Create temporary directory
-    #  ansible.builtin.tempfile:
-    #    state: directory
-    #    suffix: unique_suffix
-    #  register: temp_dir
-
-    # TODO: Check the SHA256 hash
-    #- name: Download phpBB
-    #  ansible.builtin.get_url:
-    #    url: https://download.phpbb.com/pub/release/{{ phpbb_version_parts[0] }}.{{ phpbb_version_parts[1] }}/{{ phpbb_version }}/phpBB-{{ phpbb_version }}.tar.bz2
-    #    dest: "{{ temp_dir.path }}/phpBB-{{ phpbb_version }}.tar.bz2"
-
-    - name: Download and extract phpBB
-      become: true
-      ansible.builtin.unarchive:
-        src: "https://download.phpbb.com/pub/release/{{ phpbb_version_parts[0] }}.{{ phpbb_version_parts[1] }}/{{ phpbb_version }}/phpBB-{{ phpbb_version }}.tar.bz2"
-        #src: "{{ temp_dir.path }}/phpBB-{{ phpbb_version }}.tar.bz2"
-        dest: /var/www/forums/public
-        remote_src: true
-        extra_opts: ['--strip-components=1', '--show-stored-names']
-        creates: /var/www/forums/public/index.php
-        owner: www-data
-        group: www-data
-      register: phpbb_unarchive
-
-    - name: Grep contents of phpBB configuration for PHPBB_INSTALLED
-      ansible.builtin.command: grep PHPBB_INSTALLED /var/www/forums/public/config.php
-      register: forums_installed_check
-      # We're just checking the exit code later to see if phpBB is installed, so don't set this as changed nor failed
-      failed_when: false
-      changed_when: false
-
-    - name: Create MariaDB database for forums
-      become: true
-      community.mysql.mysql_db:
-        name: forums
-        login_unix_socket: /var/run/mysqld/mysqld.sock
-
-    - name: Create password for forums admin user
-      ansible.builtin.set_fact:
-        forums_admin_password: "{{ lookup('ansible.builtin.password', 'credentials/forums/admin', length=16) }}"
-
-    - name: Create password for forums MariaDB user
-      ansible.builtin.set_fact:
-        mariadb_forums_password: "{{ lookup('ansible.builtin.password', 'credentials/mariadb/forums', length=32) }}"
-
-    - name: Create MariaDB user for forums and grant all access to the forums database
-      become: true
-      community.mysql.mysql_user:
-        name: forums
-        login_unix_socket: /var/run/mysqld/mysqld.sock
-        # Quell warning. This shouldn't matter anyway, since we aren't using column level privileges
-        column_case_sensitive: false
-        password: "{{ mariadb_forums_password }}"
-        priv: "forums.*:ALL"
-
-    - name: Install phpBB
-      when: forums_installed_check.rc != 0
+    - name: Install and set up forums
+      when: forums.enabled
       block:
-        - name: Create the phpBB install configuration file
+        - name: Create forums directory
           become: true
-          become_user: www-data
-          ansible.builtin.template:
-            src: phpbb/install-config.yml.j2
-            dest: /var/www/forums/install-config.yml
+          ansible.builtin.file:
+            path: /var/www/forums/public
+            state: directory
+            owner: www-data
+            group: www-data
 
-        - name: Run phpBB installer
+        #- name: Create temporary directory
+        #  ansible.builtin.tempfile:
+        #    state: directory
+        #    suffix: unique_suffix
+        #  register: temp_dir
+
+        # TODO: Check the SHA256 hash
+        #- name: Download phpBB
+        #  ansible.builtin.get_url:
+        #    url: https://download.phpbb.com/pub/release/{{ phpbb_version_parts[0] }}.{{ phpbb_version_parts[1] }}/{{ forums.phpbb_version }}/phpBB-{{ forums.phpbb_version }}.tar.bz2
+        #    dest: "{{ temp_dir.path }}/phpBB-{{ forums.phpbb_version }}.tar.bz2"
+
+        - name: Download and extract phpBB
           become: true
-          become_user: www-data
-          ansible.builtin.command: php /var/www/forums/public/install/phpbbcli.php install /var/www/forums/install-config.yml
+          ansible.builtin.unarchive:
+            src: "https://download.phpbb.com/pub/release/{{ phpbb_version_parts[0] }}.{{ phpbb_version_parts[1] }}/{{ forums.phpbb_version }}/phpBB-{{ forums.phpbb_version }}.tar.bz2"
+            #src: "{{ temp_dir.path }}/phpBB-{{ forums.phpbb_version }}.tar.bz2"
+            dest: /var/www/forums/public
+            remote_src: true
+            extra_opts: ['--strip-components=1', '--show-stored-names']
+            creates: /var/www/forums/public/index.php
+            owner: www-data
+            group: www-data
+          register: phpbb_unarchive
 
-        - name: Delete the phpBB installer configuration
+        - name: Grep contents of phpBB configuration for PHPBB_INSTALLED
+          ansible.builtin.command: grep PHPBB_INSTALLED /var/www/forums/public/config.php
+          register: forums_installed_check
+          # We're just checking the exit code later to see if phpBB is installed, so don't set this as changed nor failed
+          failed_when: false
+          changed_when: false
+
+        - name: Create MariaDB database for forums
+          become: true
+          community.mysql.mysql_db:
+            name: forums
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+
+        - name: Create password for forums admin user
+          ansible.builtin.set_fact:
+            forums_admin_password: "{{ lookup('ansible.builtin.password', 'credentials/forums/admin', length=16) }}"
+
+        - name: Create password for forums MariaDB user
+          ansible.builtin.set_fact:
+            mariadb_forums_password: "{{ lookup('ansible.builtin.password', 'credentials/mariadb/forums', length=32) }}"
+
+        - name: Create MariaDB user for forums and grant all access to the forums database
+          become: true
+          community.mysql.mysql_user:
+            name: forums
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+            # Quell warning. This shouldn't matter anyway, since we aren't using column level privileges
+            column_case_sensitive: false
+            password: "{{ mariadb_forums_password }}"
+            priv: "forums.*:ALL"
+
+        - name: Install phpBB
+          when: forums_installed_check.rc != 0
+          block:
+            - name: Create the phpBB install configuration file
+              become: true
+              become_user: www-data
+              ansible.builtin.template:
+                src: phpbb/install-config.yml.j2
+                dest: /var/www/forums/install-config.yml
+
+            - name: Run phpBB installer
+              become: true
+              become_user: www-data
+              ansible.builtin.command: php /var/www/forums/public/install/phpbbcli.php install /var/www/forums/install-config.yml
+
+            - name: Delete the phpBB installer configuration
+              become: true
+              become_user: www-data
+              ansible.builtin.file:
+                path: /var/www/forums/install-config.yml
+                state: absent
+
+        - name: Configure forums for HTTPS
+          when: enable_tls == 1
+          block:
+            - name: phpBB - Set cookie_secure to 1
+              become: true
+              become_user: www-data
+              ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set cookie_secure 1
+
+            - name: phpBB - Set server_protocol to https://
+              become: true
+              become_user: www-data
+              ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set server_protocol https://
+
+            - name: phpBB - Set server_port to 443
+              become: true
+              become_user: www-data
+              ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set server_port 443
+
+        - name: Configure forums for HTTP
+          when: enable_tls != 1
+          block:
+            - name: phpBB - Set cookie_secure to 0
+              become: true
+              become_user: www-data
+              ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set cookie_secure 0
+
+            - name: phpBB - Set server_protocol to http://
+              become: true
+              become_user: www-data
+              ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set server_protocol http://
+
+            - name: phpBB - Set server_port to 80
+              become: true
+              become_user: www-data
+              ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set server_port 80
+
+        - name: Delete the phpBB install directory
           become: true
           become_user: www-data
           ansible.builtin.file:
-            path: /var/www/forums/install-config.yml
+            path: /var/www/forums/public/install/
             state: absent
 
-    - name: Configure forums for HTTPS
-      when: enable_tls == 1
-      block:
-        - name: phpBB - Set cookie_secure to 1
+        - name: Disable viglink extension
           become: true
           become_user: www-data
-          ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set cookie_secure 1
+          ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php extension:disable phpbb/viglink
+          register: phpbb_disable_viglink
+          failed_when: phpbb_disable_viglink.rc == 1
+          changed_when: phpbb_disable_viglink.rc == 0
 
-        - name: phpBB - Set server_protocol to https://
+        - name: Purge data for viglink extension
           become: true
           become_user: www-data
-          ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set server_protocol https://
+          ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php extension:purge phpbb/viglink
+          when: phpbb_disable_viglink.changed
 
-        - name: phpBB - Set server_port to 443
+        - name: Delete viglink extension extension
           become: true
           become_user: www-data
-          ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set server_port 443
+          ansible.builtin.file:
+            path: /var/www/forums/public/ext/phpbb/viglink/
+            state: absent
 
-    - name: Configure forums for HTTP
-      when: enable_tls != 1
-      block:
-        - name: phpBB - Set cookie_secure to 0
+        - name: Create the forums apache snippet configuration
           become: true
-          become_user: www-data
-          ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set cookie_secure 0
+          ansible.builtin.template:
+            src: apache2/site-snippets/forums.conf.j2
+            dest: /etc/apache2/site-snippets/forums.conf
+          register: apache_snippet_forums
 
-        - name: phpBB - Set server_protocol to http://
+        - name: Create the forums virtualhost configuration
           become: true
-          become_user: www-data
-          ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set server_protocol http://
+          ansible.builtin.template:
+            src: apache2/sites-available/forums.conf.j2
+            dest: /etc/apache2/sites-available/forums.conf
+          register: apache_vhost_forums
 
-        - name: phpBB - Set server_port to 80
+        - name: Enable the forums site
           become: true
-          become_user: www-data
-          ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set server_port 80
+          ansible.builtin.command: a2ensite forums.conf
+          register: apache_ensite_forums
+          changed_when: "'already enabled' not in apache_ensite_forums.stdout"
 
-    - name: Delete the phpBB install directory
-      become: true
-      become_user: www-data
-      ansible.builtin.file:
-        path: /var/www/forums/public/install/
-        state: absent
-
-    - name: Disable viglink extension
-      become: true
-      become_user: www-data
-      ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php extension:disable phpbb/viglink
-      register: phpbb_disable_viglink
-      failed_when: phpbb_disable_viglink.rc == 1
-      changed_when: phpbb_disable_viglink.rc == 0
-
-    - name: Purge data for viglink extension
-      become: true
-      become_user: www-data
-      ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php extension:purge phpbb/viglink
-      when: phpbb_disable_viglink.changed
-
-    - name: Delete viglink extension extension
-      become: true
-      become_user: www-data
-      ansible.builtin.file:
-        path: /var/www/forums/public/ext/phpbb/viglink/
-        state: absent
-
-    - name: Create the forums apache snippet configuration
-      become: true
-      ansible.builtin.template:
-        src: apache2/site-snippets/forums.conf.j2
-        dest: /etc/apache2/site-snippets/forums.conf
-      register: apache_snippet_forums
-
-    - name: Create the forums virtualhost configuration
-      become: true
-      ansible.builtin.template:
-        src: apache2/sites-available/forums.conf.j2
-        dest: /etc/apache2/sites-available/forums.conf
-      register: apache_vhost_forums
-
-    - name: Enable the forums site
-      become: true
-      ansible.builtin.command: a2ensite forums.conf
-      register: apache_ensite_forums
-      changed_when: "'already enabled' not in apache_ensite_forums.stdout"
-
-    - name: Reload apache2
-      become: true
-      ansible.builtin.systemd_service:
-        name: apache2.service
-        state: reloaded
-      when: apache_snippet_forums.changed or apache_vhost_forums.changed or apache_ensite_forums.changed
+        - name: Reload apache2
+          become: true
+          ansible.builtin.systemd_service:
+            name: apache2.service
+            state: reloaded
+          when: apache_snippet_forums.changed or apache_vhost_forums.changed or apache_ensite_forums.changed
 
     ##############################################
     #  Central - Server list and authentication  #
     ##############################################
 
-    - name: Create central directory
-      become: true
-      ansible.builtin.file:
-        path: /var/www/central
-        state: directory
-        owner: www-data
-        group: www-data
+    - name: Install and set up central
+      when: forums.enabled and central.enabled
+      block:
+        - name: Create central directory
+          become: true
+          ansible.builtin.file:
+            path: /var/www/central
+            state: directory
+            owner: www-data
+            group: www-data
 
-    - name: Clone central repository
-      become: true
-      become_user: www-data
-      ansible.builtin.git:
-        repo: 'https://github.com/BZFlag-Dev/bzflag-bzfls3'
-        dest: /var/www/central
-        version: master
+        - name: Clone central repository
+          become: true
+          become_user: www-data
+          ansible.builtin.git:
+            repo: 'https://github.com/BZFlag-Dev/central'
+            dest: /var/www/central
+            version: master
 
-    - name: Install dependencies for central using composer
-      become: true
-      become_user: www-data
-      ansible.builtin.command: composer install -d /var/www/central --no-dev --optimize-autoloader --no-ansi
-      register: composer_install_central
-      changed_when: "'Nothing to install, update or remove' not in composer_install_central.stderr"
+        - name: Install dependencies for central using composer
+          become: true
+          become_user: www-data
+          ansible.builtin.command: composer install -d /var/www/central --no-dev --optimize-autoloader --no-ansi
+          register: composer_install_central
+          changed_when: "'Nothing to install, update or remove' not in composer_install_central.stderr"
 
-    - name: Install tools dependencies for central using composer
-      become: true
-      become_user: www-data
-      ansible.builtin.command: composer install -d /var/www/central/tools --no-dev --no-ansi
-      register: composer_install_central_tools
-      changed_when: "'Nothing to install, update or remove' not in composer_install_central_tools.stderr"
+        - name: Install tools dependencies for central using composer
+          become: true
+          become_user: www-data
+          ansible.builtin.command: composer install -d /var/www/central/tools --no-dev --no-ansi
+          register: composer_install_central_tools
+          changed_when: "'Nothing to install, update or remove' not in composer_install_central_tools.stderr"
 
-    - name: Create MariaDB database for central
-      become: true
-      community.mysql.mysql_db:
-        name: central
-        login_unix_socket: /var/run/mysqld/mysqld.sock
-      register: mariadb_created_central
+        - name: Create MariaDB database for central
+          become: true
+          community.mysql.mysql_db:
+            name: central
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+          register: mariadb_created_central
 
-    - name: Create password for central MariaDB user
-      ansible.builtin.set_fact:
-        mariadb_central_password: "{{ lookup('ansible.builtin.password', 'credentials/mariadb/central', length=32) }}"
+        - name: Create password for central MariaDB user
+          ansible.builtin.set_fact:
+            mariadb_central_password: "{{ lookup('ansible.builtin.password', 'credentials/mariadb/central', length=32) }}"
 
-    - name: Create MariaDB user for central and grant necessary access to the central and forums databases
-      become: true
-      community.mysql.mysql_user:
-        name: central
-        login_unix_socket: /var/run/mysqld/mysqld.sock
-        # Quell warning. This shouldn't matter anyway, since we aren't using column level privileges
-        column_case_sensitive: false
-        password: "{{ mariadb_central_password }}"
-        priv: "central.*:SELECT,INSERT,UPDATE,DELETE/forums.phpbb_groups:SELECT/forums.phpbb_user_group:SELECT/forums.phpbb_users:SELECT,UPDATE"
+        - name: Create MariaDB user for central and grant necessary access to the central and forums databases
+          become: true
+          community.mysql.mysql_user:
+            name: central
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+            # Quell warning. This shouldn't matter anyway, since we aren't using column level privileges
+            column_case_sensitive: false
+            password: "{{ mariadb_central_password }}"
+            priv: "central.*:SELECT,INSERT,UPDATE,DELETE/forums.phpbb_groups:SELECT/forums.phpbb_user_group:SELECT/forums.phpbb_users:SELECT,UPDATE"
 
-    - name: Create password for central_migration MariaDB user
-      ansible.builtin.set_fact:
-        mariadb_central_migration_password: "{{ lookup('ansible.builtin.password', 'credentials/mariadb/central_migration', length=32) }}"
+        - name: Create password for central_migration MariaDB user
+          ansible.builtin.set_fact:
+            mariadb_central_migration_password: "{{ lookup('ansible.builtin.password', 'credentials/mariadb/central_migration', length=32) }}"
 
-    - name: Create MariaDB user for central_migration and grant necessary access to the central
-      become: true
-      community.mysql.mysql_user:
-        name: central_migration
-        login_unix_socket: /var/run/mysqld/mysqld.sock
-        # Quell warning. This shouldn't matter anyway, since we aren't using column level privileges
-        column_case_sensitive: false
-        password: "{{ mariadb_central_migration_password }}"
-        priv: "central.*:SELECT,INSERT,UPDATE,DELETE,ALTER,CREATE,DROP"
+        - name: Create MariaDB user for central_migration and grant necessary access to the central
+          become: true
+          community.mysql.mysql_user:
+            name: central_migration
+            login_unix_socket: /var/run/mysqld/mysqld.sock
+            # Quell warning. This shouldn't matter anyway, since we aren't using column level privileges
+            column_case_sensitive: false
+            password: "{{ mariadb_central_migration_password }}"
+            priv: "central.*:SELECT,INSERT,UPDATE,DELETE,ALTER,CREATE,DROP"
 
-    - name: Create the central Phinx configuration
-      become: true
-      become_user: www-data
-      ansible.builtin.template:
-        src: central/phinx-config.php.j2
-        dest: /var/www/central/phinx-config.php
+        - name: Create the central Phinx configuration
+          become: true
+          become_user: www-data
+          ansible.builtin.template:
+            src: central/phinx-config.php.j2
+            dest: /var/www/central/phinx-config.php
 
-    - name: Check if central database requires migration
-      become: true
-      become_user: www-data
-      ansible.builtin.command: php tools/vendor/bin/phinx status -q
-      args:
-        chdir: /var/www/central
-      register: central_migration_status
-      failed_when:
-        - central_migration_status.rc != 0
-        - central_migration_status.rc != 2
-        - central_migration_status.rc != 3
-      changed_when: false
+        - name: Check if central database requires migration
+          become: true
+          become_user: www-data
+          ansible.builtin.command: php tools/vendor/bin/phinx status -q
+          args:
+            chdir: /var/www/central
+          register: central_migration_status
+          failed_when:
+            - central_migration_status.rc != 0
+            - central_migration_status.rc != 2
+            - central_migration_status.rc != 3
+          changed_when: false
 
-    - name: Migrate central database
-      when: central_migration_status.rc == 2 or central_migration_status.rc == 3
-      become: true
-      become_user: www-data
-      ansible.builtin.command: php tools/vendor/bin/phinx migrate
-      args:
-        chdir: /var/www/central
+        - name: Migrate central database
+          when: central_migration_status.rc == 2 or central_migration_status.rc == 3
+          become: true
+          become_user: www-data
+          ansible.builtin.command: php tools/vendor/bin/phinx migrate
+          args:
+            chdir: /var/www/central
 
-    - name: Create the central configuration
-      become: true
-      become_user: www-data
-      ansible.builtin.template:
-        src: central/config.php.j2
-        dest: /var/www/central/config.php
+        - name: Create the central configuration
+          become: true
+          become_user: www-data
+          ansible.builtin.template:
+            src: central/config.php.j2
+            dest: /var/www/central/config.php
 
-    - name: Create the central apache snippet configuration
-      become: true
-      ansible.builtin.template:
-        src: apache2/site-snippets/central.conf.j2
-        dest: /etc/apache2/site-snippets/central.conf
-      register: apache_snippet_central
+        - name: Create the central apache snippet configuration
+          become: true
+          ansible.builtin.template:
+            src: apache2/site-snippets/central.conf.j2
+            dest: /etc/apache2/site-snippets/central.conf
+          register: apache_snippet_central
 
-    - name: Create the central legacy apache snippet configuration
-      become: true
-      ansible.builtin.template:
-        src: apache2/site-snippets/central-legacy.conf.j2
-        dest: /etc/apache2/site-snippets/central-legacy.conf
-      register: apache_snippet_central_legacy
+        - name: Create the central legacy apache snippet configuration
+          become: true
+          ansible.builtin.template:
+            src: apache2/site-snippets/central-legacy.conf.j2
+            dest: /etc/apache2/site-snippets/central-legacy.conf
+          register: apache_snippet_central_legacy
 
-    - name: Create the central virtualhost configuration
-      become: true
-      ansible.builtin.template:
-        src: apache2/sites-available/central.conf.j2
-        dest: /etc/apache2/sites-available/central.conf
-      register: apache_vhost_central
+        - name: Create the central virtualhost configuration
+          become: true
+          ansible.builtin.template:
+            src: apache2/sites-available/central.conf.j2
+            dest: /etc/apache2/sites-available/central.conf
+          register: apache_vhost_central
 
-    - name: Enable the central site
-      become: true
-      ansible.builtin.command: a2ensite central.conf
-      register: apache_ensite_central
-      changed_when: "'already enabled' not in apache_ensite_central.stdout"
+        - name: Enable the central site
+          become: true
+          ansible.builtin.command: a2ensite central.conf
+          register: apache_ensite_central
+          changed_when: "'already enabled' not in apache_ensite_central.stdout"
 
-    - name: Reload apache2 after changes for central site
-      become: true
-      ansible.builtin.systemd_service:
-        name: apache2.service
-        state: reloaded
-      when: apache_snippet_central.changed or apache_snippet_central_legacy.changed or apache_vhost_central.changed or apache_ensite_central.changed
+        - name: Reload apache2 after changes for central site
+          become: true
+          ansible.builtin.systemd_service:
+            name: apache2.service
+            state: reloaded
+          when: apache_snippet_central.changed or apache_snippet_central_legacy.changed or apache_vhost_central.changed or apache_ensite_central.changed
+
+        - name: Create cron job to run central cron.php
+          become: true
+          become_user: www-data
+          ansible.builtin.cron:
+            name: 'Run cron.php for central'
+            minute: '*/5'
+            job: 'php /var/www/central/cron.php'
 
     ##############################
     # Homepage - Static homepage #
     ##############################
 
-    - name: Create homepage directory where the built site is copied
-      become: true
-      ansible.builtin.file:
-        path: /var/www/homepage
-        state: directory
-        owner: www-data
-        group: www-data
+    - name: Install and set up homepage
+      when: homepage.enabled
+      block:
+        - name: Create homepage directory where the built site is copied
+          become: true
+          ansible.builtin.file:
+            path: /var/www/homepage
+            state: directory
+            owner: www-data
+            group: www-data
 
-    - name: Create bzflag-bans directory where the master-bans.txt file lives
-      become: true
-      ansible.builtin.file:
-        path: /var/www/homepage-bans
-        state: directory
-        owner: www-data
-        group: www-data
+        - name: Create bzflag-bans directory where the master-bans.txt file lives
+          become: true
+          ansible.builtin.file:
+            path: /var/www/homepage-bans
+            state: directory
+            owner: www-data
+            group: www-data
 
-    - name: Create directory in /opt to store repositories and scripts for building the homepage
-      become: true
-      ansible.builtin.file:
-        path: /opt/homepage
-        state: directory
-        owner: www-data
-        group: www-data
+        - name: Create directory in /opt to store repositories and scripts for building the homepage
+          become: true
+          ansible.builtin.file:
+            path: /opt/homepage
+            state: directory
+            owner: www-data
+            group: www-data
 
-    - name: Create directory in /opt for the logs
-      become: true
-      ansible.builtin.file:
-        path: /opt/homepage/logs
-        state: directory
-        owner: www-data
-        group: www-data
+        - name: Create directory in /opt for the logs
+          become: true
+          ansible.builtin.file:
+            path: /opt/homepage/logs
+            state: directory
+            owner: www-data
+            group: www-data
 
-    - name: Clone bzflag.org repository
-      become: true
-      become_user: www-data
-      ansible.builtin.git:
-        repo: 'https://github.com/BZFlag-Dev/bzflag.org'
-        dest: /opt/homepage/bzflag.org
-        version: master
-      register: git_clone_homepage_bzflag_org
+        - name: Clone bzflag.org repository
+          become: true
+          become_user: www-data
+          ansible.builtin.git:
+            repo: 'https://github.com/BZFlag-Dev/bzflag.org'
+            dest: /opt/homepage/bzflag.org
+            version: master
+          register: git_clone_homepage_bzflag_org
 
-    - name: Clone stakx repository
-      become: true
-      become_user: www-data
-      ansible.builtin.git:
-        repo: 'https://github.com/stakx-io/stakx'
-        dest: /opt/homepage/stakx
-        version: 0.2
-      register: git_clone_homepage_stakx
+        - name: Clone stakx repository
+          become: true
+          become_user: www-data
+          ansible.builtin.git:
+            repo: 'https://github.com/stakx-io/stakx'
+            dest: /opt/homepage/stakx
+            version: 0.2
+          register: git_clone_homepage_stakx
 
-    - name: Install stakx dependencies using composer
-      become: true
-      become_user: www-data
-      ansible.builtin.command: composer install -d /opt/homepage/stakx --no-dev --optimize-autoloader --no-ansi
-      register: composer_install_homepage_stakx
-      changed_when: "'Nothing to install, update or remove' not in composer_install_homepage_stakx.stderr"
+        - name: Install stakx dependencies using composer
+          become: true
+          become_user: www-data
+          ansible.builtin.command: composer install -d /opt/homepage/stakx --no-dev --optimize-autoloader --no-ansi
+          register: composer_install_homepage_stakx
+          changed_when: "'Nothing to install, update or remove' not in composer_install_homepage_stakx.stderr"
 
-    - name: Fetch website assets
-      become: true
-      become_user: www-data
-      ansible.builtin.command: php /opt/homepage/bzflag.org/fetch-assets.php
-      register: php_fetch_assets_homepage
-      changed_when: "'Downloading' in php_fetch_assets_homepage.stdout"
+        - name: Fetch website assets
+          become: true
+          become_user: www-data
+          ansible.builtin.command: php /opt/homepage/bzflag.org/fetch-assets.php
+          register: php_fetch_assets_homepage
+          changed_when: "'Downloading' in php_fetch_assets_homepage.stdout"
 
-    - name: Create matomo.yaml
-      become: true
-      become_user: www-data
-      ansible.builtin.template:
-        src: homepage/matomo.yaml.j2
-        dest: /opt/homepage/bzflag.org/_data/matomo.yaml
+        - name: Create matomo.yaml
+          become: true
+          become_user: www-data
+          ansible.builtin.template:
+            src: homepage/matomo.yaml.j2
+            dest: /opt/homepage/bzflag.org/_data/matomo.yaml
 
-    - name: Create privacy.yaml
-      become: true
-      become_user: www-data
-      ansible.builtin.template:
-        src: homepage/privacy.yaml.j2
-        dest: /opt/homepage/bzflag.org/_data/privacy.yaml
+        - name: Create privacy.yaml
+          become: true
+          become_user: www-data
+          ansible.builtin.template:
+            src: homepage/privacy.yaml.j2
+            dest: /opt/homepage/bzflag.org/_data/privacy.yaml
 
-    - name: Build the site
-      become: true
-      become_user: www-data
-      ansible.builtin.command: /opt/homepage/stakx/bin/stakx build --use-cache
-      args:
-        chdir: /opt/homepage/bzflag.org
-      register: stakx_build_homepage
-      when: git_clone_homepage_bzflag_org.changed or git_clone_homepage_stakx.changed or composer_install_homepage_stakx.changed or php_fetch_assets_homepage.changed
+        - name: Build the site
+          become: true
+          become_user: www-data
+          ansible.builtin.command: /opt/homepage/stakx/bin/stakx build --use-cache
+          args:
+            chdir: /opt/homepage/bzflag.org
+          register: stakx_build_homepage
+          when: git_clone_homepage_bzflag_org.changed or git_clone_homepage_stakx.changed or composer_install_homepage_stakx.changed or php_fetch_assets_homepage.changed
 
-    - name: Copy the site to the final destination
-      become: true
-      become_user: www-data
-      ansible.builtin.copy:
-        src: /opt/homepage/bzflag.org/_site/
-        dest: /var/www/homepage
-        remote_src: true
-        mode: preserve
-      when: stakx_build_homepage.changed
+        - name: Copy the site to the final destination
+          become: true
+          become_user: www-data
+          ansible.builtin.copy:
+            src: /opt/homepage/bzflag.org/_site/
+            dest: /var/www/homepage
+            remote_src: true
+            mode: preserve
+          when: stakx_build_homepage.changed
 
-    # TODO: Replace this with something else, as this is archived
-    - name: Clone bzflag-web repository
-      become: true
-      become_user: www-data
-      ansible.builtin.git:
-        repo: 'https://github.com/BZFlag-Dev/bzflag-web'
-        dest: /var/www/homepage-bans
-        version: masterban
+        # TODO: Replace this with something else, as this is archived
+        - name: Clone bzflag-web repository
+          become: true
+          become_user: www-data
+          ansible.builtin.git:
+            repo: 'https://github.com/BZFlag-Dev/bzflag-web'
+            dest: /var/www/homepage-bans
+            version: masterban
 
-    - name: Create flathub directory which will contain the org.flathub.VerifiedApps.txt file
-      become: true
-      ansible.builtin.file:
-        path: /var/www/homepage-flathub
-        state: directory
-        owner: www-data
-        group: www-data
+        - name: Create flathub directory which will contain the org.flathub.VerifiedApps.txt file
+          become: true
+          ansible.builtin.file:
+            path: /var/www/homepage-flathub
+            state: directory
+            owner: www-data
+            group: www-data
 
-    - name: Create the org.flathub.VerifiedApps.txt file
-      become: true
-      become_user: www-data
-      ansible.builtin.copy:
-        content: 'f06adc6d-2675-4f19-a21e-137c12b98408'
-        dest: /var/www/homepage-flathub/org.flathub.VerifiedApps.txt
+        - name: Create the org.flathub.VerifiedApps.txt file
+          become: true
+          become_user: www-data
+          ansible.builtin.copy:
+            content: 'f06adc6d-2675-4f19-a21e-137c12b98408'
+            dest: /var/www/homepage-flathub/org.flathub.VerifiedApps.txt
 
-    - name: Create the homepage apache snippet configuration
-      become: true
-      ansible.builtin.template:
-        src: apache2/site-snippets/homepage.conf.j2
-        dest: /etc/apache2/site-snippets/homepage.conf
-      register: apache_snippet_homepage
+        - name: Create the homepage apache snippet configuration
+          become: true
+          ansible.builtin.template:
+            src: apache2/site-snippets/homepage.conf.j2
+            dest: /etc/apache2/site-snippets/homepage.conf
+          register: apache_snippet_homepage
 
-    - name: Create the homepage virtualhost configuration
-      become: true
-      ansible.builtin.template:
-        src: apache2/sites-available/homepage.conf.j2
-        dest: /etc/apache2/sites-available/homepage.conf
-      register: apache_vhost_homepage
+        - name: Create the homepage virtualhost configuration
+          become: true
+          ansible.builtin.template:
+            src: apache2/sites-available/homepage.conf.j2
+            dest: /etc/apache2/sites-available/homepage.conf
+          register: apache_vhost_homepage
 
-    - name: Enable the homepage site
-      become: true
-      ansible.builtin.command: a2ensite homepage.conf
-      register: apache_ensite_homepage
-      changed_when: "'already enabled' not in apache_ensite_homepage.stdout"
+        - name: Enable the homepage site
+          become: true
+          ansible.builtin.command: a2ensite homepage.conf
+          register: apache_ensite_homepage
+          changed_when: "'already enabled' not in apache_ensite_homepage.stdout"
 
-    - name: Reload apache2
-      become: true
-      ansible.builtin.systemd_service:
-        name: apache2.service
-        state: reloaded
-      when: apache_snippet_homepage.changed or apache_vhost_homepage.changed or apache_ensite_homepage.changed
+        - name: Reload apache2
+          become: true
+          ansible.builtin.systemd_service:
+            name: apache2.service
+            state: reloaded
+          when: apache_snippet_homepage.changed or apache_vhost_homepage.changed or apache_ensite_homepage.changed
 
-    - name: Create homepage update.sh
-      become: true
-      become_user: www-data
-      ansible.builtin.template:
-        src: homepage/update.sh.j2
-        dest: /opt/homepage/update.sh
-        mode: u+rx
+        - name: Create homepage update.sh
+          become: true
+          become_user: www-data
+          ansible.builtin.template:
+            src: homepage/update.sh.j2
+            dest: /opt/homepage/update.sh
+            mode: u+rx
 
-    - name: Create cron job to run homepage update.sh
-      become: true
-      become_user: www-data
-      ansible.builtin.cron:
-        name: 'Automatically build homepage when updated'
-        minute: '*/5'
-        job: '/opt/homepage/update.sh'
+        - name: Create cron job to run homepage update.sh
+          become: true
+          become_user: www-data
+          ansible.builtin.cron:
+            name: 'Automatically build homepage when updated'
+            minute: '*/5'
+            job: '/opt/homepage/update.sh'
 
     ###############
     # Final steps #

@@ -1,6 +1,7 @@
 <?php
   return [
     'legacy_host' => 'my.{{ base_hostname }}',
+    'enable_rest_api' => {% if central.enable_rest_api is defined and not central.enable_rest_api %}false{% else %}true{% endif %},
     'phpbb' => [
       'root_path' => '/var/www/forums/',
       'database' => 'forums',
@@ -11,3 +12,4 @@
       'password' => '{{ mariadb_central_password }}'
     ]
   ];
+

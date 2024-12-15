@@ -1,7 +1,7 @@
 base_hostname: domain.test
-phpbb_version: 3.3.13
-enable_tls: 0
+enable_tls: true
 homepage:
+  enabled: true
   build_cron:
     # Email address that stakx build notifications should be sent from
     from_address: noreply@domain.test
@@ -19,7 +19,14 @@ homepage:
       - '*.domain.test'
     base_url: 'https://apps.domain.test/matomo/'
     site_id: 1006
+forums:
+  enabled: true
+  phpbb_version: 3.3.13
+central:
+  enabled: true
+  enable_rest_api: true
 asset_manager:
+  enabled: true
   site:
     # Published address for DMCA takedown notices
     takedown_address: dmca@domain.test
