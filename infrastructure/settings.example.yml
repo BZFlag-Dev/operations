@@ -21,7 +21,7 @@ homepage:
     site_id: 1006
 forums:
   enabled: true
-  phpbb_version: 3.3.13
+  phpbb_version: 3.3.15
 central:
   enabled: true
   enable_rest_api: true
