@@ -2,19 +2,10 @@ ServerName www.{{ base_hostname }}
 ServerAlias {{ base_hostname }}
 
 <IfModule mod_ssl.c>
-Redirect permanent /documentation/getting_started/ https://www.bzflag.org/getting-started/
-<If "%{HTTP_HOST} != 'www.{{ base_hostname }}'">
-    Redirect permanent "/" "https://www.{{ base_hostname }}/"
-</If>
-<If "%{SERVER_PROTOCOL} != 'HTTPS'">
-    Redirect permanent "/" "https://www.{{ base_hostname }}/"
-</If>
+Redirect permanent /documentation/getting_started/ https://www.{{ base_hostname }}/getting-started/
 </IfModule>
 <IfModule !mod_ssl.c>
-Redirect permanent /documentation/getting_started/ http://www.bzflag.org/getting-started/
-<If "%{HTTP_HOST} != 'www.{{ base_hostname }}'">
-    Redirect permanent "/" "http://www.{{ base_hostname }}/"
-</If>
+Redirect permanent /documentation/getting_started/ http://www.{{ base_hostname }}/getting-started/
 </IfModule>
 
 DocumentRoot /var/www/homepage

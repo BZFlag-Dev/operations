@@ -1,20 +1,7 @@
-<VirtualHost *:80>
+<VirtualHost 127.0.0.1:8080>
     Include /etc/apache2/site-snippets/central-legacy.conf
 </VirtualHost>
 
-<VirtualHost *:80>
+<VirtualHost 127.0.0.1:8080>
     Include /etc/apache2/site-snippets/central.conf
 </VirtualHost>
-
-<IfModule mod_ssl.c>
-<VirtualHost *:443>
-    Include /etc/apache2/site-snippets/central-legacy.conf
-    Include /etc/apache2/site-snippets/ssl.conf
-</VirtualHost>
-
-<VirtualHost *:443>
-    Include /etc/apache2/site-snippets/central.conf
-    Include /etc/apache2/site-snippets/ssl.conf
-</VirtualHost>
-</IfModule>
-

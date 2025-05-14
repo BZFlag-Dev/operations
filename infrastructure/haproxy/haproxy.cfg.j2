@@ -1,0 +1,115 @@
+global
+    log /dev/log    local0
+    log /dev/log    local1 notice
+    chroot /var/lib/haproxy
+    stats socket /run/haproxy/admin.sock mode 660 level admin
+    stats timeout 30s
+    user haproxy
+    group haproxy
+    daemon
+
+    # Default SSL material locations
+    ca-base /etc/ssl/certs
+    crt-base /etc/ssl/private
+
+    # generated 2025-05-11, Mozilla Guideline v5.7, HAProxy 2.6, OpenSSL 3.0.15, intermediate config, no HSTS
+    # https://ssl-config.mozilla.org/#server=haproxy&version=2.6&config=intermediate&openssl=3.0.15&hsts=false&guideline=5.7
+    ssl-default-bind-curves X25519:prime256v1:secp384r1
+    ssl-default-bind-ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-CHACHA20-POLY1305
+    ssl-default-bind-ciphersuites TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256
+    ssl-default-bind-options prefer-client-ciphers ssl-min-ver TLSv1.2 no-tls-tickets
+
+    ssl-default-server-ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384:DHE-RSA-CHACHA20-POLY1305
+    ssl-default-server-ciphersuites TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256
+    ssl-default-server-options ssl-min-ver TLSv1.2 no-tls-tickets
+
+    ssl-dh-param-file /etc/haproxy/dhparam
+
+    ssl-load-extra-del-ext
+
+defaults
+    log global
+    mode http
+    option httplog
+    option dontlognull
+    option http-server-close
+    option forwardfor header X-Haproxy-Forwarded-For
+    timeout http-request 5s
+    timeout connect      5s
+    timeout client       50s
+    timeout server       50s
+    errorfile 400 /etc/haproxy/errors/400.http
+    errorfile 403 /etc/haproxy/errors/403.http
+    errorfile 408 /etc/haproxy/errors/408.http
+    errorfile 500 /etc/haproxy/errors/500.http
+    errorfile 502 /etc/haproxy/errors/502.http
+    errorfile 503 /etc/haproxy/errors/503.http
+    errorfile 504 /etc/haproxy/errors/504.http
+
+frontend main
+    mode http
+{% if tls.enabled %}
+    bind :443 ssl crt {{ base_hostname }}.crt alpn h2,http/1.1
+{% endif %}
+    bind :80
+    # TODO: Check if anyone still uses port 81
+    bind 0.0.0.0:81
+
+    # Tell apache if the request is using HTTPS
+    http-request set-header X-Forwarded-Proto https if { ssl_fc }
+
+    # Security Headers
+    http-response set-header X-Frame-Options "SAMEORIGIN"
+    http-response set-header X-Xss-Protection "1; mode=block"
+    http-response set-header X-Content-Type-Options "nosniff"
+    #http-response set-header Referrer-Policy "strict-origin-when-cross-origin"
+
+{% if tls.use_hsts %}
+    # HSTS header (730 days) for some hosts when using HTTPS
+    http-request set-var(res.host) hdr(host)
+    http-response set-header Strict-Transport-Security "max-age=63072000" if { ssl_fc } { var(res.host) -m str -i {{ base_hostname }} www.{{ base_hostname }} forums.{{ base_hostname }} central.{{ base_hostname }} }
+{% endif %}
+
+    # Tarpit a list of hosts
+    acl tarpit-hosts src -f /etc/haproxy/tarpit-hosts.lst
+    http-request tarpit if tarpit-hosts
+
+    # Deny a list of paths that bots typically hit
+    acl denied-path-begs path_beg -f /etc/haproxy/denied-path-begs.lst
+    http-request deny if denied-path-begs
+
+    # Certbot challenge path
+    acl certbot-req path_beg /.well-known/acme-challenge/
+
+    # Redirect .com and .net to the .org
+    redirect prefix http{% if tls.enabled %}s{% endif %}://www.{{ base_hostname }} code 302 if !certbot-req { hdr(host) -i bzflag.com www.bzflag.com bzflag.net www.bzflag.net }
+
+    # Redirect most of the bare domain URLs to the {% if tls.enabled %}HTTPS {% endif %}www host
+    redirect prefix http{% if tls.enabled %}s{% endif %}://www.{{ base_hostname }} code 301 if !certbot-req { hdr(Host) -i {{ base_hostname }} } !{ path_beg /master-bans.txt /motd.php }
+
+{% if tls.enabled %}
+    # Redirect most of the non-HTTPS www host URLs to the HTTPS www host
+    redirect prefix https://www.{{ base_hostname }} code 301 if !certbot-req { hdr(Host) -i www.{{ base_hostname }} } !{ ssl_fc } !{ path_beg /master-bans.txt /motd.php }
+
+    # Redirect some other HTTP URLs to their HTTPS URL
+    redirect scheme https code 301 if !certbot-req { hdr(Host) -i forums.{{ base_hostname }} } !{ ssl_fc }
+    redirect scheme https code 301 if !certbot-req { hdr(Host) -i central.{{ base_hostname }} } !{ ssl_fc }
+
+    # Only redirect the /docs directory of central to HTTPS to prevent silent upgrades of the API to HTTPS
+    redirect scheme https code 301 if !certbot-req { hdr(Host) -i central.{{ base_hostname }} } !{ ssl_fc } { path_beg /docs }
+
+    # Redirect only specific paths on the legacy bzfls to HTTPS so we do not break old clients/servers.
+    redirect scheme https code 301 if !certbot-req { hdr(Host) -i my.{{ base_hostname }} } { path_beg /weblogin.php } !{ ssl_fc }
+{% endif %}
+
+    # Use certbot backend for certificate requests
+    use_backend certbot if certbot-req
+
+    # Default to the main backend
+    default_backend main
+
+backend main
+    server apache 127.0.0.1:8080
+
+backend certbot
+    server certbot 127.0.0.1:1284

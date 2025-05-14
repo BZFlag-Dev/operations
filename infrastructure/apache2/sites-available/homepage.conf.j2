@@ -1,11 +1,3 @@
-<VirtualHost *:80>
+<VirtualHost 127.0.0.1:8080>
     Include /etc/apache2/site-snippets/homepage.conf
 </VirtualHost>
-
-<IfModule mod_ssl.c>
-<VirtualHost *:443>
-    Include /etc/apache2/site-snippets/homepage.conf
-    Include /etc/apache2/site-snippets/ssl.conf
-</VirtualHost>
-</IfModule>
-

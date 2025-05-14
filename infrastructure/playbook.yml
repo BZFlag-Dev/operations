@@ -40,6 +40,7 @@
           - bzip2
           - screen
           - vim
+          - haproxy
           - apache2
           - php-fpm
           - php-cli
@@ -56,10 +57,9 @@
           - mariadb-server
           - redis
           - unzip
-          - python3-certbot-apache
           - acl # Used by ansible for becoming an unprivileged user (https://github.com/ansible/ansible/issues/74830)
           - python3-pymysql # Used for the community.mysql tasks below.
-        state: latest
+        state: present
 
     - name: Enable Proxy FastCGI Apache module
       become: true
@@ -96,7 +96,15 @@
         creates: /etc/apache2/conf-enabled/php8.2-fpm.conf
       register: apache_conf_php
 
+    - name: Change Apache listening IP and port
+      become: true
+      ansible.builtin.template:
+        src: apache2/ports.conf.j2
+        dest: /etc/apache2/ports.conf
+      register: apache_conf_ports
+
     # This prevents the default virtualhost from overriding a virtualhost that uses the base hostname
+    # TODO: Check if just disabling the default site is enough and could replace the next two steps
     - name: Add ServerName to default apache virtualhost
       become: true
       ansible.builtin.lineinfile:
@@ -106,13 +114,21 @@
         line: "\tServerName 127.0.0.1"
       register: apache_conf_default_servername
 
+    - name: Change default VirtualHost address and port
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/apache2/sites-available/000-default.conf
+        regexp: '^<VirtualHost '
+        line: '<VirtualHost 127.0.0.1:8080>'
+      register: apache_conf_default_virtualhost
+
     - name: Restart apache2
       become: true
       ansible.builtin.systemd_service:
         name: apache2.service
         state: restarted
       ignore_errors: true
-      when: apache_mod_proxy_fcgi.changed or apache_mod_setenvif.changed or apache_mod_rewrite.changed or apache_mod_headers.changed or apache_conf_php.changed or apache_conf_default_servername.changed
+      when: apache_mod_proxy_fcgi.changed or apache_mod_setenvif.changed or apache_mod_rewrite.changed or apache_mod_headers.changed or apache_conf_php.changed or apache_conf_ports.changed or apache_conf_default_servername.changed or apache_conf_default_virtualhost.changed
 
     - name: Check if composer is installed
       ansible.builtin.stat:
@@ -161,19 +177,9 @@
         owner: www-data
         group: www-data
 
-    - name: Create the SSL apache snippet configuration
-      become: true
-      ansible.builtin.template:
-        src: apache2/site-snippets/ssl.conf.j2
-        dest: /etc/apache2/site-snippets/ssl.conf
-      register: apache_snippet_ssl
-
-    - name: Create the HSTS apache snippet configuration
-      become: true
-      ansible.builtin.template:
-        src: apache2/site-snippets/hsts.conf.j2
-        dest: /etc/apache2/site-snippets/hsts.conf
-      register: apache_snippet_hsts
+    - name: Create empty list to track hostnames being used
+      ansible.builtin.set_fact:
+        hostnames: []
 
     ############
     #  Forums  #
@@ -182,6 +188,10 @@
     - name: Install and set up forums
       when: forums.enabled
       block:
+        - name: Append the hostname for the forums
+          ansible.builtin.set_fact:
+            hostnames: "{{ hostnames + ['forums.{{ base_hostname }}'] }}"
+
         - name: Create forums directory
           become: true
           ansible.builtin.file:
@@ -190,23 +200,10 @@
             owner: www-data
             group: www-data
 
-        #- name: Create temporary directory
-        #  ansible.builtin.tempfile:
-        #    state: directory
-        #    suffix: unique_suffix
-        #  register: temp_dir
-
-        # TODO: Check the SHA256 hash
-        #- name: Download phpBB
-        #  ansible.builtin.get_url:
-        #    url: https://download.phpbb.com/pub/release/{{ phpbb_version_parts[0] }}.{{ phpbb_version_parts[1] }}/{{ forums.phpbb_version }}/phpBB-{{ forums.phpbb_version }}.tar.bz2
-        #    dest: "{{ temp_dir.path }}/phpBB-{{ forums.phpbb_version }}.tar.bz2"
-
         - name: Download and extract phpBB
           become: true
           ansible.builtin.unarchive:
             src: "https://download.phpbb.com/pub/release/{{ phpbb_version_parts[0] }}.{{ phpbb_version_parts[1] }}/{{ forums.phpbb_version }}/phpBB-{{ forums.phpbb_version }}.tar.bz2"
-            #src: "{{ temp_dir.path }}/phpBB-{{ forums.phpbb_version }}.tar.bz2"
             dest: /var/www/forums/public
             remote_src: true
             extra_opts: ['--strip-components=1', '--show-stored-names']
@@ -269,7 +266,7 @@
                 state: absent
 
         - name: Configure forums for HTTPS
-          when: enable_tls == 1
+          when: tls.enabled
           block:
             - name: phpBB - Set cookie_secure to 1
               become: true
@@ -287,7 +284,7 @@
               ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set server_port 443
 
         - name: Configure forums for HTTP
-          when: enable_tls != 1
+          when: tls.enabled != 1
           block:
             - name: phpBB - Set cookie_secure to 0
               become: true
@@ -366,6 +363,15 @@
     - name: Install and set up central
       when: forums.enabled and central.enabled
       block:
+        - name: Append the hostname for the legacy server list
+          ansible.builtin.set_fact:
+            hostnames: "{{ hostnames + ['my.{{ base_hostname }}'] }}"
+
+        - name: Append the hostname for the central services
+          when: central.enable_rest_api
+          ansible.builtin.set_fact:
+            hostnames: "{{ hostnames + ['central.{{ base_hostname }}'] }}"
+
         - name: Create central directory
           become: true
           ansible.builtin.file:
@@ -515,6 +521,10 @@
     - name: Install and set up homepage
       when: homepage.enabled
       block:
+        - name: Append the hostnames for the homepage
+          ansible.builtin.set_fact:
+            hostnames: "{{ hostnames + ['{{ base_hostname }}', 'www.{{ base_hostname }}'] }}"
+
         - name: Create homepage directory where the built site is copied
           become: true
           ansible.builtin.file:
@@ -671,6 +681,7 @@
             dest: /opt/homepage/update.sh
             mode: u+rx
 
+        # TODO: Check if we have the 'mail' command installed and set up a mail relay
         - name: Create cron job to run homepage update.sh
           become: true
           become_user: www-data
@@ -685,6 +696,10 @@
     - name: Install and set up assets
       when: asset_manager.enabled
       block:
+        - name: Append the hostname for the asset site
+          ansible.builtin.set_fact:
+            hostnames: "{{ hostnames + ['images.{{ base_hostname }}'] }}"
+
         - name: Create assets directory
           become: true
           ansible.builtin.file:
@@ -758,16 +773,93 @@
             state: reloaded
           when: apache_snippet_assets.changed or apache_vhost_assets.changed or apache_ensite_assets.changed
 
-    ###############
-    # Final steps #
-    ###############
+    ####################################################
+    # Set up haproxy and, if enabled, TLS certificates #
+    ####################################################
 
-    # NOTE: This should also enable mod_ssl and restart/reload apache2
-    - name: Create certificates
-      when: enable_tls == 1
+    - name: Download dhparam file
       become: true
-      # TODO: Allow passing in an email for renewal issue alerts
-      # TODO: Support passing --test-cert for non-production systems?
-      ansible.builtin.command: "certbot --apache --register-unsafely-without-email --agree-tos  --cert-name {{ base_hostname }} certonly"
-      register: certbot_certonly
+      ansible.builtin.get_url:
+        url: https://ssl-config.mozilla.org/ffdhe2048.txt
+        dest: /etc/haproxy/dhparam
+      register: haproxy_dhparam
 
+    - name: Create tarpit-hosts.lst
+      become: true
+      copy:
+        content: ""
+        dest: /etc/haproxy/tarpit-hosts.lst
+        force: false
+
+    - name: Create denied-path-begs.lst
+      become: true
+      copy:
+        content: ""
+        dest: /etc/haproxy/denied-path-begs.lst
+        force: false
+
+    - name: Install certbot
+      when: tls.enabled
+      become: true
+      ansible.builtin.apt:
+        name:
+          - certbot
+        state: present
+
+    - name: Check if TLS certificate exists
+      become: true
+      ansible.builtin.stat:
+        path: "/etc/letsencrypt/live/{{ base_hostname }}/fullchain.pem"
+      register: tls_certificate
+
+    - name: Request initial TLS certificate
+      when: not tls_certificate.stat.exists and tls.enabled
+      block:
+        # Must run a minimal haproxy running that will forward the certbot request
+        - name: Minimal haproxy config for certbot request
+          become: true
+          ansible.builtin.template:
+            src: haproxy/haproxy_certbot.cfg.j2
+            dest: /etc/haproxy/haproxy.cfg
+
+        - name: Reload haproxy configuration for certbot request
+          become: true
+          ansible.builtin.systemd_service:
+            name: haproxy.service
+            state: reloaded
+
+        - name: Request certificates
+          become: true
+          # TODO: Support passing --test-cert for non-production systems?
+          ansible.builtin.command: "certbot -d {{ hostnames | join(',') }} --standalone --non-interactive --http-01-port=1284 --register-unsafely-without-email --agree-tos --cert-name {{ base_hostname }} --expand --server {{ tls.acme_server }} certonly"
+          register: certbot_certonly
+
+    - name: Create link to certbot certificate
+      when: tls.enabled
+      become: true
+      ansible.builtin.file:
+        src: "/etc/letsencrypt/live/{{ base_hostname }}/fullchain.pem"
+        path: "/etc/ssl/private/{{ base_hostname }}.crt"
+        state: link
+
+    - name: Create link to certbot key
+      when: tls.enabled
+      become: true
+      ansible.builtin.file:
+        src: "/etc/letsencrypt/live/{{ base_hostname }}/privkey.pem"
+        path: "/etc/ssl/private/{{ base_hostname }}.key"
+        state: link
+
+    - name: Configure haproxy
+      become: true
+      ansible.builtin.template:
+        src: haproxy/haproxy.cfg.j2
+        dest: /etc/haproxy/haproxy.cfg
+      register: haproxy_cfg
+
+    - name: Reload haproxy configuration
+      become: true
+      ansible.builtin.systemd_service:
+        name: haproxy.service
+        state: reloaded
+      when: certbot_certonly.changed or haproxy_dhparam.changed or haproxy_cfg.changed

@@ -1,5 +1,8 @@
 base_hostname: domain.test
-enable_tls: true
+tls:
+  enabled: true
+  acme_server: https://acme-v02.api.letsencrypt.org/directory
+  use_hsts: true
 homepage:
   enabled: true
   build_cron:

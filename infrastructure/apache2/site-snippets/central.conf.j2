@@ -5,27 +5,16 @@ DocumentRoot /var/www/central/public
     Options -Indexes
     Require all granted
 
-    <IfModule mod_rewrite.c>
     RewriteEngine on
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteCond %{REQUEST_FILENAME} !-d
     RewriteRule ^ index.php [QSA,L]
-    </IfModule>
 </Directory>
 
 Alias /docs /var/www/central-docs/public/
 <Directory /var/www/central-docs/public/>
     Options -Indexes
     Require all granted
-
-    <IfModule mod_ssl.c>
-    <IfModule mod_rewrite.c>
-    # Only redirect /docs to HTTPS to prevent silent upgrades to API requests
-    RewriteEngine on
-    RewriteCond %{SERVER_NAME} =central.{{ base_hostname }}
-    RewriteRule ^ https://%{SERVER_NAME}%{REQUEST_URI} [END,NE,R=permanent]
-    </IfModule>
-    </IfModule>
 </Directory>
 
 ErrorLog ${APACHE_LOG_DIR}/central-error.log
