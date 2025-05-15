@@ -31,6 +31,7 @@
         update_cache: true
         upgrade: full
         autoremove: true
+      register: apt_upgrade
 
     - name: Install necessary software packages
       become: true
@@ -60,6 +61,12 @@
           - acl # Used by ansible for becoming an unprivileged user (https://github.com/ansible/ansible/issues/74830)
           - python3-pymysql # Used for the community.mysql tasks below.
         state: present
+      register: apt_install
+
+    - name: Reboot after package installs
+      become: true
+      ansible.builtin.reboot:
+      when: apt_upgrade.changed or apt_install.changed
 
     - name: Enable Proxy FastCGI Apache module
       become: true
