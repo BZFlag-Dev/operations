@@ -157,6 +157,11 @@
             remote_src: true
             mode: u+rwx,g+rx,o+rx
 
+        - name: Delete composer.phar
+          ansible.builtin.file:
+            path: composer.phar
+            state: absent
+
     - name: Update composer
       become: true
       ansible.builtin.command: composer self-update
