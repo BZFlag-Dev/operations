@@ -128,7 +128,8 @@
         name: apache2.service
         state: restarted
       ignore_errors: true
-      when: apache_mod_proxy_fcgi.changed or apache_mod_setenvif.changed or apache_mod_rewrite.changed or apache_mod_headers.changed or apache_conf_php.changed or apache_conf_ports.changed or apache_conf_default_servername.changed or apache_conf_default_virtualhost.changed
+      when: apache_mod_proxy_fcgi.changed or apache_mod_setenvif.changed or apache_mod_rewrite.changed or apache_mod_headers.changed or apache_conf_php.changed
+        or apache_conf_ports.changed or apache_conf_default_servername.changed or apache_conf_default_virtualhost.changed
 
     - name: Check if composer is installed
       ansible.builtin.stat:
@@ -151,7 +152,7 @@
 
     - name: Update composer
       become: true
-      ansible.builtin.shell: composer self-update
+      ansible.builtin.command: composer self-update
       register: update_composer
       changed_when: "'already using the latest' not in update_composer.stderr"
 
@@ -203,7 +204,11 @@
         - name: Download and extract phpBB
           become: true
           ansible.builtin.unarchive:
-            src: "https://download.phpbb.com/pub/release/{{ phpbb_version_parts[0] }}.{{ phpbb_version_parts[1] }}/{{ forums.phpbb_version }}/phpBB-{{ forums.phpbb_version }}.tar.bz2"
+            src:
+              "https://download.phpbb.com/pub/release/\
+              {{ phpbb_version_parts[0] }}.{{ phpbb_version_parts[1] }}/\
+              {{ forums.phpbb_version }}/\
+              phpBB-{{ forums.phpbb_version }}.tar.bz2"
             dest: /var/www/forums/public
             remote_src: true
             extra_opts: ['--strip-components=1', '--show-stored-names']
@@ -610,7 +615,8 @@
           args:
             chdir: /opt/homepage/bzflag.org
           register: stakx_build_homepage
-          when: git_clone_homepage_bzflag_org.changed or git_clone_homepage_stakx.changed or composer_install_homepage_stakx.changed or php_fetch_assets_homepage.changed
+          when: git_clone_homepage_bzflag_org.changed or git_clone_homepage_stakx.changed or composer_install_homepage_stakx.changed or
+            php_fetch_assets_homepage.changed
 
         - name: Copy the site to the final destination
           become: true
@@ -831,7 +837,9 @@
         - name: Request certificates
           become: true
           # TODO: Support passing --test-cert for non-production systems?
-          ansible.builtin.command: "certbot -d {{ hostnames | join(',') }} --standalone --non-interactive --http-01-port=1284 --register-unsafely-without-email --agree-tos --cert-name {{ base_hostname }} --expand --server {{ tls.acme_server }} certonly"
+          ansible.builtin.command:
+            "certbot -d {{ hostnames | join(',') }} --standalone --non-interactive --http-01-port=1284 --register-unsafely-without-email --agree-tos \
+            --cert-name {{ base_hostname }} --expand --server {{ tls.acme_server }} certonly"
           register: certbot_certonly
 
     - name: Create link to certbot certificate

@@ -43,4 +43,3 @@ asset_manager:
     notify_addresses:
       - admin1@domain.test
       - admin2@domain.test
-
