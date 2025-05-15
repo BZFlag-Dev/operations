@@ -282,41 +282,12 @@
                 path: /var/www/forums/install-config.yml
                 state: absent
 
-        - name: Configure forums for HTTPS
-          when: tls.enabled
-          block:
-            - name: phpBB - Set cookie_secure to 1
-              become: true
-              become_user: www-data
-              ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set cookie_secure 1
-
-            - name: phpBB - Set server_protocol to https://
-              become: true
-              become_user: www-data
-              ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set server_protocol https://
-
-            - name: phpBB - Set server_port to 443
-              become: true
-              become_user: www-data
-              ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set server_port 443
-
-        - name: Configure forums for HTTP
-          when: tls.enabled != 1
-          block:
-            - name: phpBB - Set cookie_secure to 0
-              become: true
-              become_user: www-data
-              ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set cookie_secure 0
-
-            - name: phpBB - Set server_protocol to http://
-              become: true
-              become_user: www-data
-              ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set server_protocol http://
-
-            - name: phpBB - Set server_port to 80
-              become: true
-              become_user: www-data
-              ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php config:set server_port 80
+        - name: Configure forums for HTTP or HTTPS
+          become: true
+          become_user: www-data
+          ansible.builtin.script: phpbb/update_phpbb_config.sh {{ tls.enabled }}
+          register: phpbb_config
+          changed_when: "'Updating' in phpbb_config.stdout"
 
         - name: Delete the phpBB install directory
           become: true
