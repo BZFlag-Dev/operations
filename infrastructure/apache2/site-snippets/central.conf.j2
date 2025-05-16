@@ -11,8 +11,10 @@ DocumentRoot /var/www/central/public
     RewriteRule ^ index.php [QSA,L]
 </Directory>
 
-Alias /docs /var/www/central-docs/public/
-<Directory /var/www/central-docs/public/>
+Alias /docs/swagger-initializer.js /var/www/central-docs/public/swagger-initializer.js
+Alias /docs/v1.yaml /var/www/central-docs/public/v1.yaml
+Alias /docs /var/www/central-docs/swagger-ui/dist/
+<Directory /var/www/central-docs/swagger-ui/dist/>
     Options -Indexes
     Require all granted
 </Directory>

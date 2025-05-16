@@ -375,6 +375,7 @@
             repo: 'https://github.com/BZFlag-Dev/central'
             dest: /var/www/central
             version: master
+          register: git_clone_central
 
         - name: Install dependencies for central using composer
           become: true
@@ -459,6 +460,67 @@
           ansible.builtin.template:
             src: central/config.php.j2
             dest: /var/www/central/config.php
+
+        - name: Set up REST API documentation
+          when: central.enable_rest_api
+          block:
+            - name: Create directory for swagger-ui
+              become: true
+              ansible.builtin.file:
+                path: /var/www/central-docs/swagger-ui
+                state: directory
+                recurse: yes
+                owner: www-data
+                group: www-data
+
+            - name: Fetch the latest swagger-ui release information
+              ansible.builtin.uri:
+                url: https://api.github.com/repos/swagger-api/swagger-ui/releases/latest
+                return_content: true
+              register: github_release_swagger_ui
+
+            - name: Clone swagger-ui repository
+              become: true
+              become_user: www-data
+              ansible.builtin.git:
+                repo: 'https://github.com/swagger-api/swagger-ui'
+                dest: /var/www/central-docs/swagger-ui
+                version: "{{ github_release_swagger_ui.json | community.general.json_query('tag_name')}}"
+              register: git_clone_swagger_ui
+
+            - name: Create directory for modified swagger-ui and generated OpenAPI files
+              become: true
+              ansible.builtin.file:
+                path: /var/www/central-docs/public
+                state: directory
+                recurse: yes
+                owner: www-data
+                group: www-data
+
+            - name: Copy swagger-ui swagger-initializer.js
+              become: true
+              become_user: www-data
+              when: git_clone_swagger_ui.changed
+              ansible.builtin.copy:
+                src: /var/www/central-docs/swagger-ui/dist/swagger-initializer.js
+                dest: /var/www/central-docs/public/swagger-initializer.js
+                remote_src: true
+
+            - name: Update URL in swagger-initializer.js
+              become: true
+              become_user: www-data
+              ansible.builtin.lineinfile:
+                path: /var/www/central-docs/public/swagger-initializer.js
+                regexp: 'url: '
+                line: '   url: document.location.protocol + "//central.{{ base_hostname }}/docs/v1.yaml",'
+
+            - name: Generate OpenAPI file
+              become: true
+              become_user: www-data
+              when: git_clone_central.changed or git_clone_swagger_ui.changed
+              ansible.builtin.command: php tools/vendor/bin/openapi src/Controller/v1 -o /var/www/central-docs/public/v1.yaml -b vendor/autoload.php
+              args:
+                chdir: /var/www/central
 
         - name: Create the central apache snippet configuration
           become: true
