@@ -19,7 +19,7 @@ fi
 
 # Update config if necessary
 if [ "x$CURRENT_COOKIE_SECURE" != "x$DESIRED_COOKIE_SECURE" ]; then
-  echo Updating cookie_secure
+  echo "Updating cookie_secure"
   php /var/www/forums/public/bin/phpbbcli.php config:set -q cookie_secure $DESIRED_COOKIE_SECURE
 fi
 if [ "x$CURRENT_SERVER_PROTOCOL" != "x$DESIRED_SERVER_PROTOCOL" ]; then

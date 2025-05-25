@@ -28,7 +28,8 @@ Set up an inventory.ini file, replacing the IP address with the IP or hostname o
 192.0.2.42
 ```
 
-Copy ```settings.example.yml``` to ```settings.yml``` and edit settings as desired.
+Copy `settings.example.yml` to `settings.yml` and edit settings as desired. If you enable the
+`forums.upload_local_archive` option, then download the matching phpBB .tar.bz2 archive from the phpBB download site.
 
 Set up your environment so that it is possible for Ansible to SSH in to the target server. Then run the playbook:
 ```shell

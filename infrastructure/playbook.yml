@@ -108,6 +108,7 @@
       ansible.builtin.template:
         src: apache2/ports.conf.j2
         dest: /etc/apache2/ports.conf
+        mode: '0644'
       register: apache_conf_ports
 
     # This prevents the default virtualhost from overriding a virtualhost that uses the base hostname
@@ -134,7 +135,6 @@
       ansible.builtin.systemd_service:
         name: apache2.service
         state: restarted
-      ignore_errors: true
       when: apache_mod_proxy_fcgi.changed or apache_mod_setenvif.changed or apache_mod_rewrite.changed or apache_mod_headers.changed or apache_conf_php.changed
         or apache_conf_ports.changed or apache_conf_default_servername.changed or apache_conf_default_virtualhost.changed
 
@@ -173,6 +173,7 @@
       ansible.builtin.file:
         path: /etc/apache2/site-snippets
         state: directory
+        mode: '0755'
 
     - name: Create directory for ansible
       become: true
@@ -181,6 +182,7 @@
         state: directory
         owner: www-data
         group: www-data
+        mode: '0755'
 
     - name: Create cache directory that composer can use
       become: true
@@ -189,6 +191,7 @@
         state: directory
         owner: www-data
         group: www-data
+        mode: '0755'
 
     - name: Create empty list to track hostnames being used
       ansible.builtin.set_fact:
@@ -212,29 +215,79 @@
             state: directory
             owner: www-data
             group: www-data
+            mode: '0750'
 
-        - name: Download and extract phpBB
+        - name: Check if phpBB index.php exists
           become: true
-          ansible.builtin.unarchive:
-            src:
-              "https://download.phpbb.com/pub/release/\
-              {{ phpbb_version_parts[0] }}.{{ phpbb_version_parts[1] }}/\
-              {{ forums.phpbb_version }}/\
-              phpBB-{{ forums.phpbb_version }}.tar.bz2"
-            dest: /var/www/forums/public
-            remote_src: true
-            extra_opts: ['--strip-components=1', '--show-stored-names']
-            creates: /var/www/forums/public/index.php
-            owner: www-data
-            group: www-data
-          register: phpbb_unarchive
+          become_user: www-data
+          ansible.builtin.stat:
+            path: /var/www/forums/public/index.php
+          register: forums_index_check
 
-        - name: Grep contents of phpBB configuration for PHPBB_INSTALLED
-          ansible.builtin.command: grep PHPBB_INSTALLED /var/www/forums/public/config.php
-          register: forums_installed_check
-          # We're just checking the exit code later to see if phpBB is installed, so don't set this as changed nor failed
-          failed_when: false
-          changed_when: false
+        - name: Acquire phpBB files
+          when: not forums_index_check.stat.exists
+          block:
+            - name: Check if the phpBB archive exists
+              become: true
+              become_user: www-data
+              ansible.builtin.stat:
+                path: "/var/www/forums/phpBB-{{ forums.phpbb_version }}.tar.bz2"
+                checksum_algorithm: sha256
+              register: forums_archive_check
+
+            - name: Upload phpBB archive from host and verify checksum
+              when: forums.upload_local_archive
+              block:
+                - name: Upload phpBB archive
+                  become: true
+                  become_user: www-data
+                  ansible.builtin.copy:
+                    src: "phpBB-{{ forums.phpbb_version }}.tar.bz2"
+                    dest: "/var/www/forums/phpBB-{{ forums.phpbb_version }}.tar.bz2"
+                    mode: '0640'
+                  when: not forums_archive_check.stat.exists or forums_archive_check.stat.checksum != forums.archive_sha256
+
+                - name: Check if the uploaded phpBB archive has the correct hash
+                  become: true
+                  become_user: www-data
+                  ansible.builtin.stat:
+                    path: "/var/www/forums/phpBB-{{ forums.phpbb_version }}.tar.bz2"
+                    checksum_algorithm: sha256
+                  register: forums_archive_upload_check
+                  failed_when: forums_archive_upload_check.stat.checksum != forums.archive_sha256
+
+            - name: Download phpBB archive and verify checksum
+              become: true
+              become_user: www-data
+              ansible.builtin.get_url:
+                url:
+                  "https://download.phpbb.com/pub/release/\
+                  {{ phpbb_version_parts[0] }}.{{ phpbb_version_parts[1] }}/\
+                  {{ forums.phpbb_version }}/\
+                  phpBB-{{ forums.phpbb_version }}.tar.bz2"
+                dest: "/var/www/forums/phpBB-{{ forums.phpbb_version }}.tar.bz2"
+                mode: '0640'
+                checksum: "sha256:{{ forums.archive_sha256 }}"
+              when:
+                - not forums.upload_local_archive
+                - not forums_archive_check.stat.exists or forums_archive_check.stat.checksum != forums.archive_sha256
+
+            - name: Extract phpBB
+              become: true
+              become_user: www-data
+              ansible.builtin.unarchive:
+                src: phpBB-3.3.15.tar.bz2
+                dest: /var/www/forums/public
+                extra_opts: ['--strip-components=1', '--show-stored-names']
+                creates: /var/www/forums/public/index.php
+              register: phpbb_unarchive
+
+        - name: Delete viglink extension extension
+          become: true
+          become_user: www-data
+          ansible.builtin.file:
+            path: /var/www/forums/public/ext/phpbb/viglink/
+            state: absent
 
         - name: Create MariaDB database for forums
           become: true
@@ -260,6 +313,15 @@
             password: "{{ mariadb_forums_password }}"
             priv: "forums.*:ALL"
 
+        - name: Check contents of phpBB configuration for PHPBB_INSTALLED
+          become: true
+          become_user: www-data
+          ansible.builtin.command: grep PHPBB_INSTALLED /var/www/forums/public/config.php
+          register: forums_installed_check
+          # We're just checking the exit code later to see if phpBB is installed, so don't set this as changed nor failed
+          failed_when: false
+          changed_when: false
+
         - name: Install phpBB
           when: forums_installed_check.rc != 0
           block:
@@ -269,11 +331,15 @@
               ansible.builtin.template:
                 src: phpbb/install-config.yml.j2
                 dest: /var/www/forums/install-config.yml
+                mode: '0640'
 
             - name: Run phpBB installer
               become: true
               become_user: www-data
               ansible.builtin.command: php /var/www/forums/public/install/phpbbcli.php install /var/www/forums/install-config.yml
+              register: phpbb_installer
+              failed_when: "'ERROR' in phpbb_installer.stdout"
+              changed_when: "'The installer has finished successfully' in phpbb_installer.stdout"
 
             - name: Delete the phpBB installer configuration
               become: true
@@ -296,32 +362,12 @@
             path: /var/www/forums/public/install/
             state: absent
 
-        - name: Disable viglink extension
-          become: true
-          become_user: www-data
-          ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php extension:disable phpbb/viglink
-          register: phpbb_disable_viglink
-          failed_when: phpbb_disable_viglink.rc == 1
-          changed_when: phpbb_disable_viglink.rc == 0
-
-        - name: Purge data for viglink extension
-          become: true
-          become_user: www-data
-          ansible.builtin.command: php /var/www/forums/public/bin/phpbbcli.php extension:purge phpbb/viglink
-          when: phpbb_disable_viglink.changed
-
-        - name: Delete viglink extension extension
-          become: true
-          become_user: www-data
-          ansible.builtin.file:
-            path: /var/www/forums/public/ext/phpbb/viglink/
-            state: absent
-
         - name: Create the forums apache snippet configuration
           become: true
           ansible.builtin.template:
             src: apache2/site-snippets/forums.conf.j2
             dest: /etc/apache2/site-snippets/forums.conf
+            mode: '0644'
           register: apache_snippet_forums
 
         - name: Create the forums virtualhost configuration
@@ -329,6 +375,7 @@
           ansible.builtin.template:
             src: apache2/sites-available/forums.conf.j2
             dest: /etc/apache2/sites-available/forums.conf
+            mode: '0644'
           register: apache_vhost_forums
 
         - name: Enable the forums site
@@ -367,6 +414,7 @@
             state: directory
             owner: www-data
             group: www-data
+            mode: '0755'
 
         - name: Clone central repository
           become: true
@@ -432,27 +480,16 @@
           ansible.builtin.template:
             src: central/phinx-config.php.j2
             dest: /var/www/central/phinx-config.php
-
-        - name: Check if central database requires migration
-          become: true
-          become_user: www-data
-          ansible.builtin.command: php tools/vendor/bin/phinx status -q
-          args:
-            chdir: /var/www/central
-          register: central_migration_status
-          failed_when:
-            - central_migration_status.rc != 0
-            - central_migration_status.rc != 2
-            - central_migration_status.rc != 3
-          changed_when: false
+            mode: '0640'
 
         - name: Migrate central database
-          when: central_migration_status.rc == 2 or central_migration_status.rc == 3
           become: true
           become_user: www-data
           ansible.builtin.command: php tools/vendor/bin/phinx migrate
           args:
             chdir: /var/www/central
+          register: central_phinx_migration
+          changed_when: "'migrating' in central_phinx_migration.stdout"
 
         - name: Create the central configuration
           become: true
@@ -460,6 +497,7 @@
           ansible.builtin.template:
             src: central/config.php.j2
             dest: /var/www/central/config.php
+            mode: '0640'
 
         - name: Set up REST API documentation
           when: central.enable_rest_api
@@ -469,7 +507,7 @@
               ansible.builtin.file:
                 path: /var/www/central-docs/swagger-ui
                 state: directory
-                recurse: yes
+                mode: '0750'
                 owner: www-data
                 group: www-data
 
@@ -485,7 +523,7 @@
               ansible.builtin.git:
                 repo: 'https://github.com/swagger-api/swagger-ui'
                 dest: /var/www/central-docs/swagger-ui
-                version: "{{ github_release_swagger_ui.json | community.general.json_query('tag_name')}}"
+                version: "{{ github_release_swagger_ui.json | community.general.json_query('tag_name') }}"
               register: git_clone_swagger_ui
 
             - name: Create directory for modified swagger-ui and generated OpenAPI files
@@ -493,11 +531,11 @@
               ansible.builtin.file:
                 path: /var/www/central-docs/public
                 state: directory
-                recurse: yes
+                mode: '0750'
                 owner: www-data
                 group: www-data
 
-            - name: Copy swagger-ui swagger-initializer.js
+            - name: Copy swagger-ui swagger-initializer.js # noqa: no-handler
               become: true
               become_user: www-data
               when: git_clone_swagger_ui.changed
@@ -505,6 +543,7 @@
                 src: /var/www/central-docs/swagger-ui/dist/swagger-initializer.js
                 dest: /var/www/central-docs/public/swagger-initializer.js
                 remote_src: true
+                mode: '0640'
 
             - name: Update URL in swagger-initializer.js
               become: true
@@ -514,7 +553,7 @@
                 regexp: 'url: '
                 line: '   url: document.location.protocol + "//central.{{ base_hostname }}/docs/v1.yaml",'
 
-            - name: Generate OpenAPI file
+            - name: Generate OpenAPI file # noqa: no-changed-when
               become: true
               become_user: www-data
               when: git_clone_central.changed or git_clone_swagger_ui.changed
@@ -527,6 +566,7 @@
           ansible.builtin.template:
             src: apache2/site-snippets/central.conf.j2
             dest: /etc/apache2/site-snippets/central.conf
+            mode: '0644'
           register: apache_snippet_central
 
         - name: Create the central legacy apache snippet configuration
@@ -534,6 +574,7 @@
           ansible.builtin.template:
             src: apache2/site-snippets/central-legacy.conf.j2
             dest: /etc/apache2/site-snippets/central-legacy.conf
+            mode: '0644'
           register: apache_snippet_central_legacy
 
         - name: Create the central virtualhost configuration
@@ -541,6 +582,7 @@
           ansible.builtin.template:
             src: apache2/sites-available/central.conf.j2
             dest: /etc/apache2/sites-available/central.conf
+            mode: '0644'
           register: apache_vhost_central
 
         - name: Enable the central site
@@ -582,6 +624,7 @@
             state: directory
             owner: www-data
             group: www-data
+            mode: '0750'
 
         - name: Create bzflag-bans directory where the master-bans.txt file lives
           become: true
@@ -590,6 +633,7 @@
             state: directory
             owner: www-data
             group: www-data
+            mode: '0750'
 
         - name: Create directory in /opt to store repositories and scripts for building the homepage
           become: true
@@ -598,6 +642,7 @@
             state: directory
             owner: www-data
             group: www-data
+            mode: '0750'
 
         - name: Create directory in /opt for the logs
           become: true
@@ -606,6 +651,7 @@
             state: directory
             owner: www-data
             group: www-data
+            mode: '0750'
 
         - name: Clone bzflag.org repository
           become: true
@@ -639,12 +685,22 @@
           register: php_fetch_assets_homepage
           changed_when: "'Downloading' in php_fetch_assets_homepage.stdout"
 
+        - name: Delete matomo.yaml
+          become: true
+          become_user: www-data
+          ansible.builtin.file:
+            path: /opt/homepage/bzflag.org/_data/matomo.yaml
+            state: absent
+          when: not homepage.matomo.enabled
+
         - name: Create matomo.yaml
           become: true
           become_user: www-data
           ansible.builtin.template:
             src: homepage/matomo.yaml.j2
             dest: /opt/homepage/bzflag.org/_data/matomo.yaml
+            mode: '0640'
+          when: homepage.matomo.enabled
 
         - name: Create privacy.yaml
           become: true
@@ -652,8 +708,9 @@
           ansible.builtin.template:
             src: homepage/privacy.yaml.j2
             dest: /opt/homepage/bzflag.org/_data/privacy.yaml
+            mode: '0640'
 
-        - name: Build the site
+        - name: Build the site # noqa: no-changed-when
           become: true
           become_user: www-data
           ansible.builtin.command: /opt/homepage/stakx/bin/stakx build --use-cache
@@ -663,7 +720,7 @@
           when: git_clone_homepage_bzflag_org.changed or git_clone_homepage_stakx.changed or composer_install_homepage_stakx.changed or
             php_fetch_assets_homepage.changed
 
-        - name: Copy the site to the final destination
+        - name: Copy the site to the final destination # noqa: no-handler
           become: true
           become_user: www-data
           ansible.builtin.copy:
@@ -689,6 +746,7 @@
             state: directory
             owner: www-data
             group: www-data
+            mode: '0750'
 
         - name: Create the org.flathub.VerifiedApps.txt file
           become: true
@@ -696,12 +754,14 @@
           ansible.builtin.copy:
             content: 'f06adc6d-2675-4f19-a21e-137c12b98408'
             dest: /var/www/homepage-flathub/org.flathub.VerifiedApps.txt
+            mode: '0640'
 
         - name: Create the homepage apache snippet configuration
           become: true
           ansible.builtin.template:
             src: apache2/site-snippets/homepage.conf.j2
             dest: /etc/apache2/site-snippets/homepage.conf
+            mode: '0644'
           register: apache_snippet_homepage
 
         - name: Create the homepage virtualhost configuration
@@ -709,6 +769,7 @@
           ansible.builtin.template:
             src: apache2/sites-available/homepage.conf.j2
             dest: /etc/apache2/sites-available/homepage.conf
+            mode: '0644'
           register: apache_vhost_homepage
 
         - name: Enable the homepage site
@@ -730,7 +791,7 @@
           ansible.builtin.template:
             src: homepage/update.sh.j2
             dest: /opt/homepage/update.sh
-            mode: u+rx
+            mode: '0740'
 
         # TODO: Check if we have the 'mail' command installed and set up a mail relay
         - name: Create cron job to run homepage update.sh
@@ -758,6 +819,7 @@
             state: directory
             owner: www-data
             group: www-data
+            mode: '0750'
 
         - name: Create asset-manager directory
           become: true
@@ -766,6 +828,7 @@
             state: directory
             owner: www-data
             group: www-data
+            mode: '0750'
 
         - name: Clone asset-manager repository
           become: true
@@ -796,12 +859,14 @@
           ansible.builtin.template:
             src: asset-manager/config.php.j2
             dest: /var/www/asset-manager/config.php
+            mode: '0640'
 
         - name: Create the assets apache snippet configuration
           become: true
           ansible.builtin.template:
             src: apache2/site-snippets/assets.conf.j2
             dest: /etc/apache2/site-snippets/assets.conf
+            mode: '0644'
           register: apache_snippet_assets
 
         - name: Create the assets virtualhost configuration
@@ -809,6 +874,7 @@
           ansible.builtin.template:
             src: apache2/sites-available/assets.conf.j2
             dest: /etc/apache2/sites-available/assets.conf
+            mode: '0644'
           register: apache_vhost_assets
 
         - name: Enable the assets site
@@ -833,21 +899,24 @@
       ansible.builtin.get_url:
         url: https://ssl-config.mozilla.org/ffdhe2048.txt
         dest: /etc/haproxy/dhparam
+        mode: '0644'
       register: haproxy_dhparam
 
     - name: Create tarpit-hosts.lst
       become: true
-      copy:
+      ansible.builtin.copy:
         content: ""
         dest: /etc/haproxy/tarpit-hosts.lst
         force: false
+        mode: '0644'
 
     - name: Create denied-path-begs.lst
       become: true
-      copy:
+      ansible.builtin.copy:
         content: ""
         dest: /etc/haproxy/denied-path-begs.lst
         force: false
+        mode: '0644'
 
     - name: Install certbot
       when: tls.enabled
@@ -872,6 +941,7 @@
           ansible.builtin.template:
             src: haproxy/haproxy_certbot.cfg.j2
             dest: /etc/haproxy/haproxy.cfg
+            mode: '0644'
 
         - name: Reload haproxy configuration for certbot request
           become: true
@@ -884,8 +954,9 @@
           # TODO: Support passing --test-cert for non-production systems?
           ansible.builtin.command:
             "certbot -d {{ hostnames | join(',') }} --standalone --non-interactive --http-01-port=1284 --register-unsafely-without-email --agree-tos \
-            --cert-name {{ base_hostname }} --expand --server {{ tls.acme_server }} certonly"
+            --cert-name {{ base_hostname }} --expand --server {{ tls.acme_server }} -n certonly"
           register: certbot_certonly
+          changed_when: "'Successfully received certificate' in certbot_certonly.stdout"
 
     - name: Create link to certbot certificate
       when: tls.enabled
@@ -908,6 +979,7 @@
       ansible.builtin.template:
         src: haproxy/haproxy.cfg.j2
         dest: /etc/haproxy/haproxy.cfg
+        mode: '0644'
       register: haproxy_cfg
 
     - name: Reload haproxy configuration
