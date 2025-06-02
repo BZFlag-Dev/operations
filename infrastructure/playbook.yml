@@ -18,12 +18,20 @@
         msg: The BASE_HOSTNAME environment variable was not set
       when: base_hostname == ''
 
-    # TODO: Also update /etc/hosts with the new hostname?
     - name: Set the hostname
       become: true
       ansible.builtin.hostname:
         name: "{{ base_hostname }}"
         use: systemd
+      register: set_hostname
+
+    - name: Update /etc/hosts
+      become: true
+      ansible.builtin.lineinfile:
+        path: /etc/hosts
+        regexp: '^127\.0\.1\.1[ \t]'
+        line: "127.0.1.1\t{{ base_hostname }}"
+      register: update_etc_hosts
 
     - name: Upgrade software packages
       become: true
@@ -63,10 +71,10 @@
         state: present
       register: apt_install
 
-    - name: Reboot after package installs
+    - name: Reboot after hostname change or package installs
       become: true
       ansible.builtin.reboot:
-      when: apt_upgrade.changed or apt_install.changed
+      when: set_hostname.changed or update_etc_hosts.changed or apt_upgrade.changed or apt_install.changed
 
     - name: Enable Proxy FastCGI Apache module
       become: true
