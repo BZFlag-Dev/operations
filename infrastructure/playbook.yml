@@ -38,7 +38,6 @@
       ansible.builtin.apt:
         update_cache: true
         upgrade: full
-        autoremove: true
       register: apt_upgrade
 
     - name: Install necessary software packages
@@ -75,6 +74,11 @@
       become: true
       ansible.builtin.reboot:
       when: set_hostname.changed or update_etc_hosts.changed or apt_upgrade.changed or apt_install.changed
+
+    - name: Remove unnecessary software packages
+      become: true
+      ansible.builtin.apt:
+        autoremove: true
 
     - name: Enable Proxy FastCGI Apache module
       become: true
