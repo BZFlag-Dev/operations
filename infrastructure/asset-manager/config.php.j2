@@ -2,15 +2,15 @@
 return [
   'site' => [
     'title' => 'Texture Hosting',
-    'base_url' => 'http{% if enable_tls %}s{% endif %}://images.{{ base_hostname }}',
+    'base_url' => 'http{% if tls.enabled %}s{% endif %}://images.{{ base_hostname }}',
     'takedown_address' => '{{ asset_manager.site.takedown_address }}'
   ],
   'path' => [
     'files' => '/var/www/assets/public'
   ],
   'auth' => [
-    'list_url' => 'http{% if enable_tls %}s{% endif %}://my.bzflag.org/db/',
-    'weblogin_url' => 'http{% if enable_tls %}s{% endif %}://my.bzflag.org/weblogin.php?url=',
+    'list_url' => 'http{% if tls.enabled %}s{% endif %}://my.bzflag.org/db/',
+    'weblogin_url' => 'http{% if tls.enabled %}s{% endif %}://my.bzflag.org/weblogin.php?url=',
     'admin_group' => '{{ asset_manager.auth.admin_group }}'
   ],
   'asset' => [
