@@ -42,7 +42,8 @@ forums:
   enabled: true
   phpbb_version: 3.3.15
   archive_sha256: b4a1d0b579651dcdd55f02c0b742d23fb5d45f915de60628d5aadd34d32cf761
-  upload_local_archive: false
+  # Upload archive from the same directory as the playbook instead of downloading from phpbb.com
+  upload_local_archive: true
 central:
   enabled: true
   enable_rest_api: true
