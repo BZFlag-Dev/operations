@@ -3,16 +3,31 @@ tls:
   enabled: true
   acme_server: https://acme-v02.api.letsencrypt.org/directory
   use_hsts: true
+smtp:
+  enabled: true
+  relay_host: relay.domain.test
+  relay_port: 465
+  # One of tls, starttls, or plain
+  relay_protocol: tls
+  relay_username: some_username
+  relay_password: some_password
+  # Unmonitored email address for services like the asset-manager
+  from_address_noreply: noreply@domain.test
+  # Monitored email address for services like the forum
+  from_address_reply: reply@domain.test
+  # Address that local daemons will default to sending to
+  admin_address: admin@domain.test
+  # Default domain used to replace localhost in the sender address
+  default_domain: domain.test
 homepage:
   enabled: true
   build_cron:
-    # Email address that stakx build notifications should be sent from
-    from_address: noreply@domain.test
     # Email addresses that stakx build notifications should be sent to
     notify_addresses:
       - admin1@domain.test
       - admin2@domain.test
   privacy:
+    # Website operator information
     operator:
       name: Joe Somebody
       email: joe@domain.test
@@ -40,8 +55,6 @@ asset_manager:
     # The forum group whose members are granted moderator rights on the asset manager
     admin_group: SOME.GROUP
   email:
-    # Email address that emails to users and moderators should be sent from
-    from_address: noreply@domain.test
     # Email address that should be notified about uploaded assets
     notify_addresses:
       - admin1@domain.test

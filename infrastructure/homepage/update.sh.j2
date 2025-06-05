@@ -10,7 +10,7 @@ LOCK_FILE=$BASE_DIR/.update.lock
 
 pushd $REPO_DIR 1> /dev/null
 
-git fetch --all 1> /dev/null
+git fetch --all --quiet
 
 LOCAL_REV=$(git rev-parse $BRANCH)
 REMOTE_REV=$(git rev-parse origin/$BRANCH)
@@ -36,7 +36,7 @@ if  [[ "$LOCAL_REV" != "$REMOTE_REV" || "x$1" == "xforce" ]] ; then
                 # Attempt to update stakx
                 echo "** Updating stakx **" && \
                 git pull --ff-only && \
-                composer install --no-dev --optimize-autoloader --no-ansi && \
+                /usr/local/bin/composer install --no-dev --optimize-autoloader --no-ansi && \
 
                 # Change back to the previous directory
                 popd 1> /dev/null && \
@@ -47,13 +47,15 @@ if  [[ "$LOCAL_REV" != "$REMOTE_REV" || "x$1" == "xforce" ]] ; then
                 $STAKX_DIR/bin/stakx build --use-cache && \
                 cp -Rp _site/* $TARGET_DIR && \
                 echo "Success!" && echo "🌮️ BZFlag Site Build - Success" > $SUBJECT_FILE
-        ) 2>&1 | tee $LOGFILE
+        ) 2>&1 | tee $LOG_FILE
 
         rm $LOCK_FILE
 
+{% if smtp.enabled %}
 {% for notify_address in homepage.build_cron.notify_addresses %}
-        cat $LOG_FILE | mail -s "`cat $SUBJEFT_FILE`" -r "{{ homepage.build_cron.from_address }}" "{{ notify_address }}"
+        cat $LOG_FILE | mail -s "`cat $SUBJECT_FILE`" -r "{{ smtp.from_address_noreply }}" "{{ notify_address }}"
 {% endfor %}
+{% endif %}
 fi
 
 popd 1> /dev/null

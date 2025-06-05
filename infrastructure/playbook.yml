@@ -80,6 +80,72 @@
       ansible.builtin.apt:
         autoremove: true
 
+    - name: Install and configure nullmailer
+      when: smtp.enabled
+      block:
+        - name: Install nullmailer and mailutils
+          become: true
+          ansible.builtin.apt:
+            name:
+              - nullmailer
+              - mailutils
+            state: present
+
+        - name: Update /etc/mailname
+          become: true
+          ansible.builtin.copy:
+            # TODO: Test if this should be the system hostname or the email domain
+            content: "{{ smtp.default_domain }}"
+            dest: /etc/mailname
+            mode: '0644'
+            owner: root
+            group: root
+          register: smtp_mailname
+
+        - name: Update /etc/nullmailer/remotes
+          become: true
+          ansible.builtin.copy:
+            content: >
+              {{ smtp.relay_host }} smtp --port={{ smtp.relay_port }}
+              {% if smtp.relay_protocol == 'tls' %}
+              --tls
+              {% elif smtp.relay_protocol == 'starttls' %}
+              --starttls
+              {% endif %}
+              --user='{{ smtp.relay_username }}' --pass='{{ smtp.relay_password }}'
+            dest: /etc/nullmailer/remotes
+            mode: '0600'
+            owner: mail
+            group: mail
+          register: smtp_remotes
+
+        - name: Update /etc/nullmailer/adminaddr
+          become: true
+          ansible.builtin.copy:
+            content: "{{ smtp.admin_address }}"
+            dest: /etc/nullmailer/adminaddr
+            mode: '0644'
+            owner: root
+            group: root
+          register: smtp_adminaddr
+
+        - name: Update /etc/nullmailer/defaultdomain
+          become: true
+          ansible.builtin.copy:
+            content: "{{ smtp.default_domain }}"
+            dest: /etc/nullmailer/defaultdomain
+            mode: '0644'
+            owner: root
+            group: root
+          register: smtp_defaultdomain
+
+        - name: Restart nullmailer
+          become: true
+          ansible.builtin.systemd_service:
+            name: nullmailer.service
+            state: restarted
+          when: smtp_mailname.changed or smtp_remotes.changed or smtp_adminaddr.changed or smtp_defaultdomain.changed
+
     - name: Enable Proxy FastCGI Apache module
       become: true
       ansible.builtin.command: a2enmod proxy_fcgi
@@ -805,14 +871,13 @@
             dest: /opt/homepage/update.sh
             mode: '0740'
 
-        # TODO: Check if we have the 'mail' command installed and set up a mail relay
         - name: Create cron job to run homepage update.sh
           become: true
           become_user: www-data
           ansible.builtin.cron:
             name: 'Automatically build homepage when updated'
             minute: '*/5'
-            job: '/opt/homepage/update.sh'
+            job: '/opt/homepage/update.sh >/dev/null 2>&1'
 
     ###############
     # Assets Site #

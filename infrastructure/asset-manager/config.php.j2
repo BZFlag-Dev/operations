@@ -21,7 +21,7 @@ return [
     ]
   ],
   'email' => [
-    'from_address' => '{{ asset_manager.email.from_address }}',
+    'from_address' => '{{ smtp.from_address_noreply }}',
     'notify_addresses' => [
 {% for address in asset_manager.email.notify_addresses %}
       '{{ address }}'{% if not loop.last %},{% endif %}

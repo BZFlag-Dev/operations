@@ -19,8 +19,13 @@ installer:
     table_prefix: phpbb_
 
   email:
+{% if smtp.enabled %}
     enabled: true
+    smtp_delivery: false
+{% else %}
+    enabled: false
     smtp_delivery: ~
+{% endif %}
     smtp_host: ~
     smtp_port: ~
     smtp_auth: ~
