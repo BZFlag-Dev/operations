@@ -429,7 +429,7 @@
         - name: Configure forums for HTTP or HTTPS
           become: true
           become_user: www-data
-          ansible.builtin.script: phpbb/update_phpbb_config.sh {{ tls.enabled }}
+          ansible.builtin.script: phpbb/update_phpbb_config.sh{% if tls.enabled %} --tls{% endif %}
           register: phpbb_config
           changed_when: "'Updating' in phpbb_config.stdout"
 
@@ -439,6 +439,14 @@
           ansible.builtin.file:
             path: /var/www/forums/public/install/
             state: absent
+
+        - name: Create cron job to phpBB cron:run
+          become: true
+          become_user: www-data
+          ansible.builtin.cron:
+            name: 'Run phpBB cron tasks'
+            minute: '*/5'
+            job: 'php /var/www/forums/public/bin/phpbbcli.php cron:run >/dev/null 2>&1'
 
         - name: Create the forums apache snippet configuration
           become: true
