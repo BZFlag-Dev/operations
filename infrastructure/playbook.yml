@@ -52,23 +52,35 @@
           - apache2
           - php-fpm
           - php-cli
-          - php-mysql
           - php-redis
           - php-json
           - php-mbstring
           - php-intl
           - php-curl
           - php-gd
-          - php-sqlite3
           - php-xml
-          - mariadb-client
-          - mariadb-server
           - redis
           - unzip
           - acl # Used by ansible for becoming an unprivileged user (https://github.com/ansible/ansible/issues/74830)
-          - python3-pymysql # Used for the community.mysql tasks below.
         state: present
       register: apt_install
+
+    - name: Install MariaDB
+      become: true
+      ansible.builtin.apt:
+        name:
+          - php-mysql
+          - mariadb-client
+          - mariadb-server
+          - python3-pymysql # Used for the community.mysql tasks below.
+      when: central.enabled
+
+    - name: Install SQLite support in PHP
+      become: true
+      ansible.builtin.apt:
+        name:
+          - php-sqlite3
+      when: asset_manager.enabled
 
     - name: Reboot after hostname change or package installs
       become: true
