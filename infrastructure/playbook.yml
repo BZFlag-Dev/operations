@@ -489,6 +489,64 @@
             state: reloaded
           when: apache_snippet_forums.changed or apache_vhost_forums.changed or apache_ensite_forums.changed
 
+        - name: Install and set up Anubis for forums
+          block:
+            - name: Create directory for Anubis program files
+              become: true
+              ansible.builtin.file:
+                path: /opt/anubis
+                state: directory
+                mode: '0755'
+
+            - name: Create directory for Anubis configuration files
+              become: true
+              ansible.builtin.file:
+                path: /etc/anubis
+                state: directory
+                mode: '0755'
+
+            - name: Download Anubis archive and verify checksum
+              become: true
+              ansible.builtin.get_url:
+                url: "https://github.com/TecharoHQ/anubis/releases/download/v1.21.3/anubis-1.21.3-linux-amd64.tar.gz"
+                dest: "/opt/anubis/anubis.tar.bz2"
+                mode: '0640'
+                checksum: "sha256:f0642806303e4a117460017bd8c191c085cb95a9b2ddf395240d0c2546264e63"
+
+            - name: Extract Anubis
+              become: true
+              ansible.builtin.unarchive:
+                src: /opt/anubis/anubis.tar.bz2
+                dest: /opt/anubis
+                remote_src: yes
+                extra_opts: [ '--strip-components=1', '--show-stored-names' ]
+                creates: /opt/anubis/bin/anubis
+
+            - name: Create Anubis environment file for forums
+              become: true
+              ansible.builtin.template:
+                src: anubis/env.j2
+                dest: /etc/anubis/forums.env
+                mode: '0644'
+              vars:
+                anubis_bind: '127.0.0.1:8924'
+                anubis_difficulty: 4
+                anubis_metrics_bind: '127.0.0.1:9091'
+
+            - name: Create systemd service file
+              become: true
+              ansible.builtin.copy:
+                src: anubis/anubis@.service
+                dest: /etc/systemd/system/anubis@.service
+                mode: '0640'
+
+            - name: Enable and start the Anubis service for the forums
+              become: true
+              ansible.builtin.systemd_service:
+                name: anubis@forums
+                enabled: true
+                state: started
+
     ##############################################
     #  Central - Server list and authentication  #
     ##############################################
@@ -1012,6 +1070,14 @@
       ansible.builtin.copy:
         content: ""
         dest: /etc/haproxy/denied-path-begs.lst
+        force: false
+        mode: '0644'
+
+    - name: Create anubis-bypass.lst
+      become: true
+      ansible.builtin.copy:
+        content: ""
+        dest: /etc/haproxy/anubis-bypass.lst
         force: false
         mode: '0644'
 

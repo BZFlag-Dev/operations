@@ -109,11 +109,22 @@ frontend main
     use_backend certbot if certbot-req
 {% endif %}
 
+{% if central.enabled %}
+    acl anubis-bypass src -f /etc/haproxy/anubis-bypass.lst
+    use_backend anubis-forums if { hdr(Host) -i forums.{{ base_hostname }} } !anubis-bypass
+{% endif %}
+
     # Default to the main backend
     default_backend main
 
 backend main
     server apache 127.0.0.1:8080
+
+{% if central.enabled %}
+ backend anubis-forums
+    http-request set-header X-Real-Ip %[src]
+    server anubis-forums 127.0.0.1:8924
+{% endif %}
 
 {% if tls.enabled %}
 backend certbot
