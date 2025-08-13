@@ -39,7 +39,6 @@ homepage:
     base_url: 'https://apps.domain.test/matomo/'
     site_id: 1006
 forums:
-  enabled: true
   phpbb_version: 3.3.15
   archive_sha256: b4a1d0b579651dcdd55f02c0b742d23fb5d45f915de60628d5aadd34d32cf761
   # Upload archive from the same directory as the playbook instead of downloading from phpbb.com

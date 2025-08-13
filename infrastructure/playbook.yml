@@ -280,7 +280,7 @@
     ############
 
     - name: Install and set up forums
-      when: forums.enabled
+      when: central.enabled
       block:
         - name: Append the hostname for the forums
           ansible.builtin.set_fact:
@@ -482,7 +482,7 @@
     ##############################################
 
     - name: Install and set up central
-      when: forums.enabled and central.enabled
+      when: central.enabled
       block:
         - name: Append the hostname for the legacy server list
           ansible.builtin.set_fact:
