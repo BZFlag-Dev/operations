@@ -88,9 +88,12 @@ frontend main
     redirect prefix http{% if tls.enabled %}s{% endif %}://www.{{ base_hostname }} code 301 if !certbot-req { hdr(Host) -i {{ base_hostname }} } !{ path_beg /master-bans.txt /motd.php }
 
 {% if tls.enabled %}
+{%   if homepage.enabled %}
     # Redirect most of the non-HTTPS www host URLs to the HTTPS www host
     redirect prefix https://www.{{ base_hostname }} code 301 if !certbot-req { hdr(Host) -i www.{{ base_hostname }} } !{ ssl_fc } !{ path_beg /master-bans.txt /motd.php }
+{%   endif %}
 
+{%   if central.enabled %}
     # Redirect some other HTTP URLs to their HTTPS URL
     redirect scheme https code 301 if !certbot-req { hdr(Host) -i forums.{{ base_hostname }} } !{ ssl_fc }
     redirect scheme https code 301 if !certbot-req { hdr(Host) -i central.{{ base_hostname }} } !{ ssl_fc }
@@ -100,10 +103,11 @@ frontend main
 
     # Redirect only specific paths on the legacy bzfls to HTTPS so we do not break old clients/servers.
     redirect scheme https code 301 if !certbot-req { hdr(Host) -i my.{{ base_hostname }} } { path_beg /weblogin.php } !{ ssl_fc }
-{% endif %}
+{%   endif %}
 
     # Use certbot backend for certificate requests
     use_backend certbot if certbot-req
+{% endif %}
 
     # Default to the main backend
     default_backend main
@@ -111,5 +115,7 @@ frontend main
 backend main
     server apache 127.0.0.1:8080
 
+{% if tls.enabled %}
 backend certbot
     server certbot 127.0.0.1:1284
+{% endif %}
