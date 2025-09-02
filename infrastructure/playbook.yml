@@ -186,6 +186,28 @@
         creates: /etc/apache2/mods-enabled/headers.load
       register: apache_mod_headers
 
+    - name: Create configuration for remoteip Apache module
+      become: true
+      ansible.builtin.copy:
+        content: |
+          RemoteIPHeader X-Haproxy-Forwarded-For
+          RemoteIPInternalProxy 127.0.0.1
+          RemoteIPInternalProxy ::1
+        dest: /etc/apache2/mods-available/remoteip.conf
+        mode: '0644'
+        owner: root
+        group: root
+      register: apache_mod_remoteip_conf
+
+    - name: Enable remoteip Apache module
+      become: true
+      ansible.builtin.command: a2enmod remoteip
+      args:
+        creates:
+          - /etc/apache2/mods-enabled/remoteip.load
+          - /etc/apache2/mods-enabled/remoteip.conf
+      register: apache_mod_remoteip
+
     - name: Enable PHP FPM configuration
       become: true
       ansible.builtin.command: a2enconf php8.2-fpm
@@ -225,8 +247,10 @@
       ansible.builtin.systemd_service:
         name: apache2.service
         state: restarted
-      when: apache_mod_proxy_fcgi.changed or apache_mod_setenvif.changed or apache_mod_rewrite.changed or apache_mod_headers.changed or apache_conf_php.changed
-        or apache_conf_ports.changed or apache_conf_default_servername.changed or apache_conf_default_virtualhost.changed
+      when: apache_mod_proxy_fcgi.changed or apache_mod_setenvif.changed or apache_mod_rewrite.changed
+        or apache_mod_remoteip_conf.changed or apache_mod_remoteip.changed or apache_mod_headers.changed
+        or apache_conf_php.changed or apache_conf_ports.changed or apache_conf_default_servername.changed
+        or apache_conf_default_virtualhost.changed
 
     - name: Check if composer is installed
       ansible.builtin.stat:

@@ -57,6 +57,7 @@ frontend main
 
     # Tell apache if the request is using HTTPS
     http-request set-header X-Forwarded-Proto https if { ssl_fc }
+    http-request set-header X-Forwarded-Proto http if !{ ssl_fc }
 
     # Security Headers
     http-response set-header X-Frame-Options "SAMEORIGIN"
@@ -103,6 +104,12 @@ frontend main
 
     # Redirect only specific paths on the legacy bzfls to HTTPS so we do not break old clients/servers.
     redirect scheme https code 301 if !certbot-req { hdr(Host) -i my.{{ base_hostname }} } { path_beg /weblogin.php } !{ ssl_fc }
+{%   endif %}
+
+{%   if asset_manager.enabled %}
+    # Redirect only specific paths on the asset manager to HTTPS so we do not break old clients/servers.
+    redirect scheme https code 301 if !certbot-req { hdr(Host) -i images.{{ base_hostname }} } { path /manage } !{ ssl_fc }
+    redirect scheme https code 301 if !certbot-req { hdr(Host) -i images.{{ base_hostname }} } { path_beg /manage/ } !{ ssl_fc }
 {%   endif %}
 
     # Use certbot backend for certificate requests
