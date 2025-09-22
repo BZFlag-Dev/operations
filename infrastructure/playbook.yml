@@ -38,6 +38,11 @@
         line: "127.0.1.1\t{{ base_hostname }}"
       register: update_etc_hosts
 
+    - name: Set timezone to UTC
+      become: true
+      community.general.timezone:
+        name: UTC
+
     - name: Upgrade software packages
       become: true
       ansible.builtin.apt:
