@@ -13,6 +13,11 @@
     # Initial setup #
     #################
 
+    - name: Ensure we are running Debian 13
+      ansible.builtin.fail:
+        msg: "The target system must be running Debian 13"
+      when: ansible_facts['distribution'] != 'Debian' or ansible_facts['distribution_major_version'] != '13'
+
     - name: Check if base hostname not set
       ansible.builtin.fail:
         msg: The BASE_HOSTNAME environment variable was not set
@@ -210,9 +215,9 @@
 
     - name: Enable PHP FPM configuration
       become: true
-      ansible.builtin.command: a2enconf php8.2-fpm
+      ansible.builtin.command: a2enconf php8.4-fpm
       args:
-        creates: /etc/apache2/conf-enabled/php8.2-fpm.conf
+        creates: /etc/apache2/conf-enabled/php8.4-fpm.conf
       register: apache_conf_php
 
     - name: Change Apache listening IP and port

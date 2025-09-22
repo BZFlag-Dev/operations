@@ -22,6 +22,8 @@ pipx inject --include-apps ansible ansible-lint
 Running the playbook
 --------------------
 
+The playbook assumes the use of Debian 13 hosts.
+
 Set up an inventory.ini file, replacing the IP address with the IP or hostname of the target server:
 ```ini
 [mainserver]
