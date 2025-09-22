@@ -213,9 +213,7 @@
       become: true
       ansible.builtin.command: a2enmod remoteip
       args:
-        creates:
-          - /etc/apache2/mods-enabled/remoteip.load
-          - /etc/apache2/mods-enabled/remoteip.conf
+        creates: /etc/apache2/mods-enabled/remoteip.conf
       register: apache_mod_remoteip
 
     - name: Enable PHP FPM configuration
