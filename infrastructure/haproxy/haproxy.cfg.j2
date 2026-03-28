@@ -103,7 +103,7 @@ frontend main
     redirect scheme https code 301 if !certbot-req { hdr(Host) -i central.{{ base_hostname }} } !{ ssl_fc } { path_beg /docs }
 
     # Redirect only specific paths on the legacy bzfls to HTTPS so we do not break old clients/servers.
-    redirect scheme https code 301 if !certbot-req { hdr(Host) -i my.{{ base_hostname }} } { path_beg /weblogin.php } !{ ssl_fc }
+    redirect scheme https code 301 if !certbot-req { hdr(Host) -i my.{{ base_hostname }} } { path_beg /weblogin.php /listkeys/ } !{ ssl_fc }
 {%   endif %}
 
 {%   if asset_manager.enabled %}
