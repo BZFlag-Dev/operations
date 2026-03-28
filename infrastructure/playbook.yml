@@ -550,8 +550,8 @@
               ansible.builtin.unarchive:
                 src: /opt/anubis/anubis.tar.bz2
                 dest: /opt/anubis
-                remote_src: yes
-                extra_opts: [ '--strip-components=1', '--show-stored-names' ]
+                remote_src: true
+                extra_opts: ['--strip-components=1', '--show-stored-names']
                 creates: /opt/anubis/bin/anubis
 
             - name: Create Anubis environment file for forums
