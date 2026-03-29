@@ -602,7 +602,7 @@
             state: directory
             owner: www-data
             group: www-data
-            mode: '0755'
+            mode: '0750'
 
         - name: Clone central repository
           become: true
@@ -913,9 +913,10 @@
           become_user: www-data
           ansible.builtin.copy:
             src: /opt/homepage/bzflag.org/_site/
-            dest: /var/www/homepage
+            dest: /var/www/homepage/
             remote_src: true
-            mode: preserve
+            mode: '0640'
+            directory_mode: '0750'
           when: stakx_build_homepage.changed
 
         # TODO: Replace this with something else, as this is archived
